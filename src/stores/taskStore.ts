@@ -1,0 +1,228 @@
+import { create } from 'zustand';
+import { invoke } from '@tauri-apps/api/core';
+import type { TaskInfo, TaskStatus, CreateTaskInput, UpdateTaskInput, Task, FloatWindow } from '../types';
+import { toTask } from '../types';
+
+// Content cache for task descriptions
+const contentCache = new Map<string, string>();
+
+interface TaskState {
+    tasks: Task[];
+    selectedTaskId: string | null;
+    selectedTaskContent: string;
+    loading: boolean;
+    error: string | null;
+
+    // Actions
+    fetchTasks: () => Promise<void>;
+    fetchTasksByFolder: (folderPath: string) => Promise<void>;
+    fetchTasksByStatus: (status: TaskStatus) => Promise<Task[]>;
+    getTaskContent: (id: string) => Promise<string>;
+    createTask: (input: CreateTaskInput) => Promise<Task>;
+    updateTask: (input: UpdateTaskInput & { isVisible?: boolean }) => Promise<void>;
+    deleteTask: (id: string) => Promise<void>;
+    selectTask: (id: string | null) => void;
+
+    // Sync helpers
+    getTaskById: (id: string) => Task | null;
+    getTasksByStatus: (status: TaskStatus) => Task[];
+    getDoingTasks: () => Task[];
+    getVisibleDoingTasks: () => Task[];
+    updateTaskPositionLocal: (taskId: string, x: number, y: number, width: number, height: number) => void;
+    moveTaskToFolder: (id: string, targetFolderPath: string) => Promise<void>;
+}
+
+export const useTaskStore = create<TaskState>((set, get) => ({
+    tasks: [],
+    selectedTaskId: null,
+    selectedTaskContent: '',
+    loading: false,
+    error: null,
+
+    fetchTasks: async () => {
+        set({ loading: true, error: null });
+        try {
+            const tasksInfo = await invoke<TaskInfo[]>('getTasks', {
+                folderPath: null,
+                status: null,
+            });
+            // Don't load content upfront - only load when task is selected
+            const tasks = tasksInfo.map((info) => {
+                const cachedDescription = contentCache.get(info.id) || '';
+                return toTask(info, cachedDescription);
+            });
+            set({ tasks, loading: false });
+        } catch (error) {
+            set({ error: String(error), loading: false });
+        }
+    },
+
+    fetchTasksByFolder: async (folderPath: string) => {
+        set({ loading: true, error: null });
+        try {
+            const tasksInfo = await invoke<TaskInfo[]>('getTasks', {
+                folderPath,
+                status: null,
+            });
+            // Don't load content upfront - only load when task is selected
+            const tasks = tasksInfo.map((info) => {
+                const cachedDescription = contentCache.get(info.id) || '';
+                return toTask(info, cachedDescription);
+            });
+            set({ tasks, loading: false });
+        } catch (error) {
+            set({ error: String(error), loading: false });
+        }
+    },
+
+    fetchTasksByStatus: async (status: TaskStatus) => {
+        const tasksInfo = await invoke<TaskInfo[]>('getTasks', {
+            folderPath: null,
+            status,
+        });
+        // Don't load content upfront - only load when task is selected
+        const tasks = tasksInfo.map((info) => {
+            const cachedDescription = contentCache.get(info.id) || '';
+            return toTask(info, cachedDescription);
+        });
+        return tasks;
+    },
+
+    getTaskContent: async (id: string) => {
+        const cached = contentCache.get(id);
+        if (cached !== undefined) {
+            set({ selectedTaskContent: cached });
+            return cached;
+        }
+        const content = await invoke<string>('getTaskContent', { id });
+        contentCache.set(id, content);
+        // Update both selectedTaskContent and the task in the tasks array
+        set(state => ({
+            selectedTaskContent: content,
+            tasks: state.tasks.map(t => t.id === id ? { ...t, description: content } : t),
+        }));
+        return content;
+    },
+
+    createTask: async (input: CreateTaskInput) => {
+        const taskInfo = await invoke<TaskInfo>('createTask', { input });
+        const description = input.content || '';
+        contentCache.set(taskInfo.id, description);
+        const task = toTask(taskInfo, description);
+        set(state => ({ tasks: [...state.tasks, task] }));
+        return task;
+    },
+
+    updateTask: async (input: UpdateTaskInput & { isVisible?: boolean }) => {
+        // Build the UpdateTaskInput for the backend
+        const backendInput: UpdateTaskInput = {
+            id: input.id,
+            title: input.title,
+            status: input.status,
+            color: input.color,
+            pinned: input.pinned,
+            tags: input.tags,
+            due: input.due,
+            content: input.content,
+        };
+
+        // Handle float window updates
+        if (input.isVisible !== undefined || input.float) {
+            const currentTask = get().tasks.find(t => t.id === input.id);
+            if (currentTask) {
+                const floatWindow: FloatWindow = {
+                    x: input.float?.x ?? currentTask.windowX,
+                    y: input.float?.y ?? currentTask.windowY,
+                    w: input.float?.w ?? currentTask.windowWidth,
+                    h: input.float?.h ?? currentTask.windowHeight,
+                    show: input.isVisible ?? input.float?.show ?? currentTask.isVisible,
+                };
+                backendInput.float = floatWindow;
+            }
+        }
+
+        await invoke('updateTask', { input: backendInput });
+
+        // Update content cache if content was changed
+        if (input.content !== undefined) {
+            contentCache.set(input.id, input.content);
+        }
+
+        set(state => ({
+            tasks: state.tasks.map(t => {
+                if (t.id !== input.id) return t;
+                return {
+                    ...t,
+                    title: input.title ?? t.title,
+                    status: (input.status as TaskStatus) ?? t.status,
+                    color: input.color ?? t.color,
+                    pinned: input.pinned ?? t.pinned,
+                    tags: input.tags ?? t.tags,
+                    due: input.due ?? t.due,
+                    description: input.content ?? t.description,
+                    isVisible: input.isVisible ?? t.isVisible,
+                    windowX: input.float?.x ?? t.windowX,
+                    windowY: input.float?.y ?? t.windowY,
+                    windowWidth: input.float?.w ?? t.windowWidth,
+                    windowHeight: input.float?.h ?? t.windowHeight,
+                    updated: Date.now(),
+                };
+            }),
+        }));
+    },
+
+    deleteTask: async (id: string) => {
+        await invoke('deleteTask', { id });
+        contentCache.delete(id);
+        set(state => ({
+            tasks: state.tasks.filter(t => t.id !== id),
+            selectedTaskId: state.selectedTaskId === id ? null : state.selectedTaskId,
+        }));
+    },
+
+    selectTask: (id: string | null) => {
+        set({ selectedTaskId: id });
+        if (id) {
+            get().getTaskContent(id);
+        } else {
+            set({ selectedTaskContent: '' });
+        }
+    },
+
+    getTaskById: (id: string) => {
+        return get().tasks.find(t => t.id === id) || null;
+    },
+
+    getTasksByStatus: (status: TaskStatus) => {
+        return get().tasks.filter(t => t.status === status);
+    },
+
+    getDoingTasks: () => {
+        return get().tasks.filter(t => t.status === 'doing');
+    },
+
+    getVisibleDoingTasks: () => {
+        return get().tasks.filter(t => t.status === 'doing' && t.isVisible);
+    },
+
+    updateTaskPositionLocal: (taskId: string, x: number, y: number, width: number, height: number) => {
+        set(state => ({
+            tasks: state.tasks.map(t => {
+                if (t.id !== taskId) return t;
+                return {
+                    ...t,
+                    windowX: x,
+                    windowY: y,
+                    windowWidth: width,
+                    windowHeight: height,
+                };
+            }),
+        }));
+    },
+
+    moveTaskToFolder: async (id: string, targetFolderPath: string) => {
+        await invoke('moveTaskToFolder', { id, targetFolderPath });
+        // Refetch all tasks to ensure consistency (path, rank, etc. all change on backend)
+        await get().fetchTasks();
+    },
+}));

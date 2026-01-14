@@ -1,0 +1,391 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* Configure class-based dark mode for Tailwind v4 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
+
+  /* Claude-inspired color palette */
+  /* Light mode colors */
+  --color-cream-50: #FDFCFB;
+  --color-cream-100: #FAF9F7;
+  --color-cream-200: #F5F3F0;
+  --color-cream-300: #EBE8E4;
+  --color-cream-400: #D8D3CC;
+  --color-cream-500: #B5AFA6;
+
+  /* Dark mode colors */
+  --color-charcoal-900: #1A1A1A;
+  --color-charcoal-800: #242424;
+  --color-charcoal-700: #2E2E2E;
+  --color-charcoal-600: #393939;
+  --color-charcoal-500: #4A4A4A;
+  --color-charcoal-400: #6B6B6B;
+
+  /* Accent colors */
+  --color-accent: #DA7756;
+  --color-accent-hover: #C96847;
+  --color-accent-light: #F0D4C8;
+
+  /* Status colors */
+  --color-status-todo: #9CA3AF;
+  --color-status-doing: #DA7756;
+  --color-status-done: #6B9F78;
+
+  /* Note colors */
+  --color-note-blue: #5B8DEF;
+  --color-note-green: #6B9F78;
+  --color-note-yellow: #D4A72C;
+  --color-note-orange: #DA7756;
+  --color-note-red: #D66565;
+  --color-note-purple: #9B7ED9;
+  --color-note-pink: #D47B9E;
+  --color-note-cyan: #4BA3A3;
+}
+
+/* Base styles */
+html, body, #root {
+  @apply h-full w-full m-0 p-0;
+}
+
+body {
+  @apply font-sans antialiased;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Light mode base */
+body {
+  background-color: var(--color-cream-100);
+  color: #2D2D2D;
+}
+
+/* Dark mode base */
+.dark body {
+  background-color: var(--color-charcoal-900);
+  color: #E8E6E3;
+}
+
+/* Floating window - transparent background for rounded corners */
+html.floating-window {
+  background: transparent !important;
+  background-color: transparent !important;
+  overflow: hidden !important;
+}
+
+html.floating-window body {
+  background: transparent !important;
+  background-color: transparent !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+html.floating-window #root {
+  background: transparent !important;
+  background-color: transparent !important;
+  overflow: hidden !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Floating window container - full size with transparent background */
+.floating-window-container {
+  width: 100%;
+  height: 100%;
+  background: transparent !important;
+  background-color: transparent !important;
+  margin: 0;
+  overflow: hidden;
+  position: relative;
+  box-sizing: border-box;
+}
+
+html.floating-window .floating-window-container {
+  background: transparent !important;
+  overflow: hidden !important;
+}
+
+/* Hide scrollbars on floating windows outer containers */
+html.floating-window > body::-webkit-scrollbar,
+html.floating-window > body > #root::-webkit-scrollbar,
+html.floating-window .floating-window-container::-webkit-scrollbar {
+  display: none;
+}
+
+html.floating-window > body,
+html.floating-window > body > #root,
+html.floating-window .floating-window-container {
+  scrollbar-width: none;
+}
+
+/* Content area inside floating windows can scroll with thin scrollbar */
+html.floating-window .floating-content-scroll::-webkit-scrollbar {
+  width: 4px;
+  display: block;
+}
+
+html.floating-window .floating-content-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+html.floating-window .floating-content-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 2px;
+}
+
+.dark html.floating-window .floating-content-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  @apply w-2 h-2;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-cream-400);
+  @apply rounded-full;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background-color: var(--color-charcoal-500);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-cream-500);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-charcoal-400);
+}
+
+/* Floating note window styles */
+.floating-note {
+  @apply rounded-2xl shadow-2xl overflow-hidden;
+  -webkit-app-region: no-drag;
+}
+
+.floating-note-header {
+  -webkit-app-region: drag;
+}
+
+.floating-note-header button,
+.floating-note-header input,
+.floating-note-header .no-drag {
+  -webkit-app-region: no-drag;
+  cursor: pointer !important;
+}
+
+.floating-note-content,
+.floating-note-footer {
+  -webkit-app-region: no-drag;
+}
+
+.floating-note-footer button {
+  -webkit-app-region: no-drag;
+  cursor: pointer !important;
+}
+
+/* TipTap editor styles */
+.tiptap {
+  @apply outline-none min-h-[100px] p-4;
+}
+
+.tiptap p {
+  @apply my-1;
+}
+
+.tiptap h1 {
+  @apply text-2xl font-semibold my-3;
+}
+
+.tiptap h2 {
+  @apply text-xl font-semibold my-2;
+}
+
+.tiptap h3 {
+  @apply text-lg font-medium my-2;
+}
+
+.tiptap ul,
+.tiptap ol {
+  @apply pl-6 my-2;
+}
+
+.tiptap ul {
+  @apply list-disc;
+}
+
+.tiptap ol {
+  @apply list-decimal;
+}
+
+.tiptap li {
+  @apply my-1;
+}
+
+.tiptap ul[data-type="taskList"] {
+  @apply list-none pl-0;
+}
+
+.tiptap ul[data-type="taskList"] li {
+  @apply flex items-start gap-2;
+}
+
+.tiptap ul[data-type="taskList"] li > label {
+  @apply flex-shrink-0 mt-1;
+}
+
+.tiptap ul[data-type="taskList"] li > div {
+  @apply flex-1;
+}
+
+.tiptap code {
+  background-color: var(--color-cream-200);
+  @apply px-1.5 py-0.5 rounded text-sm font-mono;
+}
+
+.dark .tiptap code {
+  background-color: var(--color-charcoal-700);
+}
+
+.tiptap pre {
+  background-color: var(--color-charcoal-800);
+  @apply text-gray-100 p-4 rounded-xl my-3 overflow-x-auto;
+}
+
+.tiptap pre code {
+  @apply bg-transparent p-0;
+}
+
+.tiptap blockquote {
+  border-left-color: var(--color-accent);
+  @apply border-l-3 pl-4 italic my-2 text-gray-600;
+}
+
+.dark .tiptap blockquote {
+  @apply text-gray-400;
+}
+
+.tiptap a {
+  color: var(--color-accent);
+  @apply underline decoration-1 underline-offset-2;
+}
+
+.tiptap a:hover {
+  color: var(--color-accent-hover);
+}
+
+.tiptap hr {
+  border-color: var(--color-cream-300);
+  @apply my-6;
+}
+
+.dark .tiptap hr {
+  border-color: var(--color-charcoal-600);
+}
+
+/* Placeholder styles */
+.tiptap p.is-editor-empty:first-child::before {
+  color: var(--color-cream-500);
+  @apply float-left h-0 pointer-events-none;
+  content: attr(data-placeholder);
+}
+
+.dark .tiptap p.is-editor-empty:first-child::before {
+  color: var(--color-charcoal-400);
+}
+
+/* Kanban board animations */
+@keyframes card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.kanban-card-enter {
+  animation: card-enter 0.2s ease-out;
+}
+
+/* Glass effect for floating notes */
+.glass {
+  background-color: rgba(250, 249, 247, 0.85);
+  @apply backdrop-blur-xl;
+}
+
+.dark .glass {
+  background-color: rgba(26, 26, 26, 0.85);
+}
+
+/* Status indicator colors */
+.status-todo {
+  background-color: var(--color-cream-300);
+}
+
+.dark .status-todo {
+  background-color: var(--color-charcoal-600);
+}
+
+.status-doing {
+  background-color: var(--color-accent);
+}
+
+.status-done {
+  background-color: var(--color-status-done);
+}
+
+/* Custom button styles */
+.btn-primary {
+  background-color: var(--color-accent);
+  @apply text-white font-medium rounded-lg px-4 py-2 transition-colors;
+}
+
+.btn-primary:hover {
+  background-color: var(--color-accent-hover);
+}
+
+/* Card styles */
+.card {
+  background-color: white;
+  border-color: var(--color-cream-300);
+  @apply rounded-xl border;
+}
+
+.dark .card {
+  background-color: var(--color-charcoal-800);
+  border-color: var(--color-charcoal-600);
+}
+
+/* Input styles */
+input:focus, textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-light);
+}
+
+.dark input:focus, .dark textarea:focus {
+  box-shadow: 0 0 0 3px rgba(218, 119, 86, 0.2);
+}
+
+/* Selection color */
+::selection {
+  background-color: var(--color-accent-light);
+  color: #2D2D2D;
+}
+
+.dark ::selection {
+  background-color: rgba(218, 119, 86, 0.3);
+  color: #E8E6E3;
+}

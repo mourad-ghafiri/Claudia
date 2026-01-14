@@ -1,0 +1,53 @@
+[package]
+name = "claudia"
+version = "0.1.0"
+description = "A modern notes and task management application"
+authors = ["Mourad Ghafiri"]
+edition = "2021"
+
+[lib]
+name = "claudia_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+tauri-plugin-opener = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5"
+parking_lot = "0.12"
+rfd = "0.15"
+urlencoding = "2"
+notify = "7"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+futures = "0.3"
+
+# MCP Server - Official SDK
+rmcp = { version = "0.12.0", features = ["server", "transport-streamable-http-server"] }
+axum = "0.8"
+tokio-util = "0.7"
+schemars = "1"
+
+# Filesystem-based storage
+serde_yaml = "0.9"
+walkdir = "2"
+slug = "0.1"
+
+# Password encryption
+aes-gcm = "0.10"
+argon2 = "0.5"
+rand = "0.8"
+base64 = "0.22"
+
+# Window effects (vibrancy/blur with rounded corners)
+window-vibrancy = "0.5"
+
