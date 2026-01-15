@@ -193,7 +193,7 @@ export function PasswordsView() {
             toast.success('Password copied to clipboard');
             // Auto-clear after 30 seconds
             setTimeout(() => {
-                copyTextToClipboard('').catch(() => {});
+                copyTextToClipboard('').catch(() => { });
             }, 30000);
         } catch (e) {
             toast.error(`Failed to copy: ${String(e)}`);
@@ -491,7 +491,16 @@ const SortablePasswordCard = memo(function SortablePasswordCard({
     const cardRef = useRef<HTMLDivElement>(null);
     const hasRequestedRef = useRef(false);
 
-    // IntersectionObserver - request content when card is visible
+    // Reset request flag when cache is invalidated (content becomes null)
+    useEffect(() => {
+        if (!cachedContent && hasRequestedRef.current) {
+            hasRequestedRef.current = false;
+            // Immediately request fresh content since card is already visible
+            onRequestContent(password.id);
+        }
+    }, [cachedContent, password.id, onRequestContent]);
+
+    // IntersectionObserver - request content when card is visible (for initial load)
     useEffect(() => {
         if (cachedContent || hasRequestedRef.current) return;
 

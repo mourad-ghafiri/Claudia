@@ -154,16 +154,18 @@ export const usePasswordStore = create<PasswordState>((set, get) => ({
     },
 
     updatePassword: async (input) => {
-        const { masterPassword, fetchPasswords } = get();
+        const { masterPassword, fetchPasswords, invalidateCache } = get();
         if (!masterPassword) {
             throw new Error('Vault is locked');
         }
         await invoke('updatePassword', { input: { ...input, masterPassword } });
+        invalidateCache(input.id); // Clear stale cached content for this password
         await fetchPasswords();
     },
 
     deletePassword: async (id) => {
         await invoke('deletePassword', { id });
+        get().invalidateCache(id); // Clear cached content for deleted password
         await get().fetchPasswords();
     },
 
