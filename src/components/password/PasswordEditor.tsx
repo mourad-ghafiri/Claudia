@@ -166,7 +166,7 @@ export function PasswordEditor() {
                             value={url}
                             onChange={(e) => setUrl(e.target.value)}
                             placeholder="https://example.com"
-                            className="w-full px-3 py-2 bg-[#F5F3F0] dark:bg-[#2E2E2E] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-sm text-[#2D2D2D] dark:text-[#E8E6E3] focus:border-[#DA7756] focus:outline-none focus:ring-1 focus:ring-[#DA7756]"
+                            className="w-full px-3 py-2 bg-[#FAF9F7] dark:bg-[#1A1A1A] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-sm text-[#2D2D2D] dark:text-[#E8E6E3] placeholder-[#B5AFA6] dark:placeholder-[#6B6B6B] focus:outline-none focus:border-[#DA7756]"
                         />
                     </div>
 
@@ -180,7 +180,7 @@ export function PasswordEditor() {
                             value={username}
                             onChange={(e) => setUsername(e.target.value)}
                             placeholder="user@example.com"
-                            className="w-full px-3 py-2 bg-[#F5F3F0] dark:bg-[#2E2E2E] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-sm text-[#2D2D2D] dark:text-[#E8E6E3] focus:border-[#DA7756] focus:outline-none focus:ring-1 focus:ring-[#DA7756]"
+                            className="w-full px-3 py-2 bg-[#FAF9F7] dark:bg-[#1A1A1A] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-sm text-[#2D2D2D] dark:text-[#E8E6E3] placeholder-[#B5AFA6] dark:placeholder-[#6B6B6B] focus:outline-none focus:border-[#DA7756]"
                         />
                     </div>
 
@@ -195,7 +195,7 @@ export function PasswordEditor() {
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 placeholder="••••••••"
-                                className="w-full px-3 py-2 pr-10 bg-[#F5F3F0] dark:bg-[#2E2E2E] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-sm text-[#2D2D2D] dark:text-[#E8E6E3] focus:border-[#DA7756] focus:outline-none focus:ring-1 focus:ring-[#DA7756]"
+                                className="w-full px-3 py-2 pr-10 bg-[#FAF9F7] dark:bg-[#1A1A1A] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-sm text-[#2D2D2D] dark:text-[#E8E6E3] placeholder-[#B5AFA6] dark:placeholder-[#6B6B6B] focus:outline-none focus:border-[#DA7756]"
                             />
                             <button
                                 type="button"
@@ -241,7 +241,7 @@ export function PasswordEditor() {
                             onChange={(e) => setNotes(e.target.value)}
                             placeholder="Additional notes (security questions, recovery codes, etc.)"
                             rows={3}
-                            className="w-full px-3 py-2 bg-[#F5F3F0] dark:bg-[#2E2E2E] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-sm text-[#2D2D2D] dark:text-[#E8E6E3] focus:border-[#DA7756] focus:outline-none focus:ring-1 focus:ring-[#DA7756] resize-none"
+                            className="w-full px-3 py-2 bg-[#FAF9F7] dark:bg-[#1A1A1A] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-sm text-[#2D2D2D] dark:text-[#E8E6E3] placeholder-[#B5AFA6] dark:placeholder-[#6B6B6B] focus:outline-none focus:border-[#DA7756] resize-none"
                         />
                     </div>
                 </div>

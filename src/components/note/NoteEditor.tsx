@@ -163,7 +163,7 @@ export function NoteEditor({ noteId: propNoteId, embedded = false }: { noteId?: 
             <select
               value={folderPath || ''}
               onChange={(e) => setFolderPath(e.target.value || null)}
-              className="text-sm px-3 py-1.5 bg-[#F5F3F0] dark:bg-[#2E2E2E] border border-[#EBE8E4] dark:border-[#393939] rounded-xl text-[#2D2D2D] dark:text-[#E8E6E3] focus:ring-2 focus:ring-[#DA7756]"
+              className="text-sm px-3 py-2 bg-[#FAF9F7] dark:bg-[#1A1A1A] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-[#2D2D2D] dark:text-[#E8E6E3] focus:outline-none focus:border-[#DA7756]"
             >
               <option value="">Root Folder</option>
               {folders.map((folder: { path: string; name: string }) => (

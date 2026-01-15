@@ -369,14 +369,9 @@ html.floating-window .floating-content-scroll::-webkit-scrollbar-thumb {
 }
 
 /* Input styles */
-input:focus, textarea:focus {
+input:focus, textarea:focus, select:focus {
   outline: none;
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-light);
-}
-
-.dark input:focus, .dark textarea:focus {
-  box-shadow: 0 0 0 3px rgba(218, 119, 86, 0.2);
 }
 
 /* Selection color */

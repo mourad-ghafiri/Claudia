@@ -125,7 +125,7 @@ export function Header() {
             onFocus={() => setIsSearchFocused(true)}
             onBlur={() => setIsSearchFocused(false)}
             placeholder={currentView === 'notes' ? 'Search notes...' : currentView === 'tasks' ? 'Search tasks...' : 'Search passwords...'}
-            className="w-full pl-10 pr-4 py-2 bg-[#F5F3F0] dark:bg-[#2E2E2E] border border-transparent rounded-xl text-sm text-[#2D2D2D] dark:text-[#E8E6E3] placeholder:text-[#B5AFA6] dark:placeholder:text-[#6B6B6B] focus:border-[#DA7756] focus:ring-0 transition-colors"
+            className="w-full pl-10 pr-4 py-2 bg-[#FAF9F7] dark:bg-[#1A1A1A] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-sm text-[#2D2D2D] dark:text-[#E8E6E3] placeholder-[#B5AFA6] dark:placeholder-[#6B6B6B] focus:outline-none focus:border-[#DA7756] transition-colors"
           />
         </motion.div>
       </div>

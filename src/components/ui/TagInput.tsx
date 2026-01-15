@@ -39,7 +39,7 @@ export function TagInput({
   };
 
   return (
-    <div className="flex flex-wrap gap-2 p-2 bg-[#F5F3F0] dark:bg-[#2E2E2E] rounded-xl border border-[#EBE8E4] dark:border-[#393939] focus-within:ring-2 focus-within:ring-[#DA7756] focus-within:border-[#DA7756]">
+    <div className="flex flex-wrap gap-2 p-2 bg-[#FAF9F7] dark:bg-[#1A1A1A] rounded-lg border border-[#EBE8E4] dark:border-[#393939] focus-within:border-[#DA7756]">
       <AnimatePresence mode="popLayout">
         {value.map((tag) => (
           <motion.span

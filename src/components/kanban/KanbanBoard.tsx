@@ -253,7 +253,7 @@ export function KanbanBoard() {
                           if (e.key === 'Enter') handleRenameFolder(folder.path, editingFolderName);
                           if (e.key === 'Escape') setEditingFolderPath(null);
                         }}
-                        className="flex-1 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded"
+                        className="flex-1 px-3 py-2 text-sm bg-[#FAF9F7] dark:bg-[#1A1A1A] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-[#2D2D2D] dark:text-[#E8E6E3] placeholder-[#B5AFA6] dark:placeholder-[#6B6B6B] focus:outline-none focus:border-[#DA7756]"
                         autoFocus
                       />
                       <button
@@ -325,7 +325,7 @@ export function KanbanBoard() {
                       if (e.key === 'Escape') { setShowNewFolder(false); setNewFolderName(''); }
                     }}
                     placeholder="Folder name..."
-                    className="flex-1 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded"
+                    className="flex-1 px-3 py-2 text-sm bg-[#FAF9F7] dark:bg-[#1A1A1A] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-[#2D2D2D] dark:text-[#E8E6E3] placeholder-[#B5AFA6] dark:placeholder-[#6B6B6B] focus:outline-none focus:border-[#DA7756]"
                     autoFocus
                   />
                   <button

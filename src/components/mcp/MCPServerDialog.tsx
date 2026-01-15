@@ -109,7 +109,7 @@ export function MCPServerDialog({ isOpen, onClose }: MCPServerDialogProps) {
                                             Connection URL (SSE)
                                         </label>
                                         <div className="flex items-center gap-2">
-                                            <div className="flex-1 bg-[#F5F3F0] dark:bg-[#1A1A1A] border border-[#EBE8E4] dark:border-[#2E2E2E] rounded-lg px-3 py-2 text-sm font-mono text-[#4A4A4A] dark:text-[#B5AFA6] truncate select-all">
+                                            <div className="flex-1 bg-[#FAF9F7] dark:bg-[#1A1A1A] border border-[#EBE8E4] dark:border-[#393939] rounded-lg px-3 py-2 text-sm font-mono text-[#4A4A4A] dark:text-[#B5AFA6] truncate select-all">
                                                 {MCP_URL}
                                             </div>
                                             <button
@@ -132,7 +132,7 @@ export function MCPServerDialog({ isOpen, onClose }: MCPServerDialogProps) {
                                             Client Configuration
                                         </label>
                                         <div className="relative">
-                                            <pre className="bg-[#F5F3F0] dark:bg-[#1A1A1A] border border-[#EBE8E4] dark:border-[#2E2E2E] rounded-lg px-3 py-2 text-xs font-mono text-[#4A4A4A] dark:text-[#B5AFA6] overflow-x-auto">
+                                            <pre className="bg-[#FAF9F7] dark:bg-[#1A1A1A] border border-[#EBE8E4] dark:border-[#393939] rounded-lg px-3 py-2 text-xs font-mono text-[#4A4A4A] dark:text-[#B5AFA6] overflow-x-auto">
                                                 {JSON.stringify(clientConfig, null, 2)}
                                             </pre>
                                             <button

@@ -302,7 +302,7 @@ export function SettingsModal() {
               value={localSettings.notificationMinutesBefore}
               onChange={(e) => updateLocalSetting('notificationMinutesBefore', parseInt(e.target.value))}
               disabled={!localSettings.notificationsEnabled}
-              className="px-3 py-1.5 rounded-lg bg-[#F5F3F0] dark:bg-[#2E2E2E] border border-[#EBE8E4] dark:border-[#393939] text-sm text-[#2D2D2D] dark:text-[#E8E6E3] focus:border-[#DA7756] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-3 py-2 rounded-lg bg-[#FAF9F7] dark:bg-[#1A1A1A] border border-[#EBE8E4] dark:border-[#393939] text-sm text-[#2D2D2D] dark:text-[#E8E6E3] focus:border-[#DA7756] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <option value={5}>5 minutes</option>
               <option value={10}>10 minutes</option>
@@ -337,7 +337,7 @@ export function SettingsModal() {
                       type={showCurrentPassword ? 'text' : 'password'}
                       value={currentPassword}
                       onChange={(e) => setCurrentPassword(e.target.value)}
-                      className="w-full px-3 py-2 pr-10 bg-[#F5F3F0] dark:bg-[#2E2E2E] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-sm text-[#2D2D2D] dark:text-[#E8E6E3] focus:border-[#DA7756] focus:outline-none"
+                      className="w-full px-3 py-2 pr-10 bg-[#FAF9F7] dark:bg-[#1A1A1A] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-sm text-[#2D2D2D] dark:text-[#E8E6E3] placeholder-[#B5AFA6] dark:placeholder-[#6B6B6B] focus:border-[#DA7756] focus:outline-none"
                     />
                     <button
                       type="button"
@@ -363,7 +363,7 @@ export function SettingsModal() {
                       type={showNewPassword ? 'text' : 'password'}
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
-                      className="w-full px-3 py-2 pr-10 bg-[#F5F3F0] dark:bg-[#2E2E2E] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-sm text-[#2D2D2D] dark:text-[#E8E6E3] focus:border-[#DA7756] focus:outline-none"
+                      className="w-full px-3 py-2 pr-10 bg-[#FAF9F7] dark:bg-[#1A1A1A] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-sm text-[#2D2D2D] dark:text-[#E8E6E3] placeholder-[#B5AFA6] dark:placeholder-[#6B6B6B] focus:border-[#DA7756] focus:outline-none"
                     />
                     <button
                       type="button"
@@ -388,7 +388,7 @@ export function SettingsModal() {
                     type="password"
                     value={confirmNewPassword}
                     onChange={(e) => setConfirmNewPassword(e.target.value)}
-                    className="w-full px-3 py-2 bg-[#F5F3F0] dark:bg-[#2E2E2E] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-sm text-[#2D2D2D] dark:text-[#E8E6E3] focus:border-[#DA7756] focus:outline-none"
+                    className="w-full px-3 py-2 bg-[#FAF9F7] dark:bg-[#1A1A1A] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-sm text-[#2D2D2D] dark:text-[#E8E6E3] placeholder-[#B5AFA6] dark:placeholder-[#6B6B6B] focus:border-[#DA7756] focus:outline-none"
                   />
                 </div>
 

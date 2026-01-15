@@ -109,12 +109,12 @@ export function DateTimePicker({
         type="button"
         onClick={() => setIsOpen(!isOpen)}
         className={`
-          w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all text-left
+          w-full flex items-center gap-3 px-3 py-2 rounded-lg border transition-all text-left
           ${value
             ? 'bg-[#DA7756]/5 border-[#DA7756]/30 text-[#DA7756]'
-            : 'bg-[#F5F3F0] dark:bg-[#2E2E2E] border-[#EBE8E4] dark:border-[#393939] text-[#6B6B6B] dark:text-[#B5AFA6]'
+            : 'bg-[#FAF9F7] dark:bg-[#1A1A1A] border-[#EBE8E4] dark:border-[#393939] text-[#6B6B6B] dark:text-[#B5AFA6]'
           }
-          hover:border-[#DA7756] focus:outline-none focus:ring-2 focus:ring-[#DA7756]/20
+          hover:border-[#DA7756] focus:outline-none focus:border-[#DA7756]
         `}
       >
         <Calendar className={`w-4 h-4 flex-shrink-0 ${value ? 'text-[#DA7756]' : ''}`} />
@@ -173,7 +173,7 @@ export function DateTimePicker({
                         handleDateSelect(new Date(e.target.value + 'T12:00:00'));
                       }
                     }}
-                    className="w-full px-3 py-2 bg-[#F5F3F0] dark:bg-[#2E2E2E] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-sm text-[#2D2D2D] dark:text-[#E8E6E3] focus:outline-none focus:ring-2 focus:ring-[#DA7756]/20 focus:border-[#DA7756]"
+                    className="w-full px-3 py-2 bg-[#FAF9F7] dark:bg-[#1A1A1A] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-sm text-[#2D2D2D] dark:text-[#E8E6E3] focus:outline-none focus:border-[#DA7756]"
                   />
                 </div>
               </div>
@@ -212,7 +212,7 @@ export function DateTimePicker({
                       type="time"
                       value={time}
                       onChange={handleCustomTimeChange}
-                      className="flex-1 px-3 py-1.5 bg-[#F5F3F0] dark:bg-[#2E2E2E] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-sm text-[#2D2D2D] dark:text-[#E8E6E3] focus:outline-none focus:ring-2 focus:ring-[#DA7756]/20 focus:border-[#DA7756]"
+                      className="flex-1 px-3 py-2 bg-[#FAF9F7] dark:bg-[#1A1A1A] border border-[#EBE8E4] dark:border-[#393939] rounded-lg text-sm text-[#2D2D2D] dark:text-[#E8E6E3] focus:outline-none focus:border-[#DA7756]"
                     />
                   </div>
                 </div>
