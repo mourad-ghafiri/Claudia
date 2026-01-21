@@ -135,7 +135,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
                     pinned: input.pinned ?? n.pinned,
                     tags: input.tags ?? n.tags,
                     content: input.content ?? n.content,
-                    isVisible: input.isVisible ?? n.isVisible,
+                    isVisible: input.isVisible ?? input.float?.show ?? n.isVisible,
                     windowX: input.float?.x ?? n.windowX,
                     windowY: input.float?.y ?? n.windowY,
                     windowWidth: input.float?.w ?? n.windowWidth,

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useTaskStore } from '../stores/taskStore';
+import { useNoteStore } from '../stores/noteStore';
 import { useUIStore } from '../stores/uiStore';
 import {
   closeAllFloatingWindows,
@@ -9,6 +10,7 @@ import {
 
 export function useFloatingWindows() {
   const { updateTask, updateTaskPositionLocal, getTaskById } = useTaskStore();
+  const { updateNote, updateNotePositionLocal, getNoteById } = useNoteStore();
   const { areFloatingTasksVisible, setFloatingTasksVisible } = useUIStore();
   const openWindowsRef = useRef<Set<string>>(new Set());
 
@@ -81,6 +83,54 @@ export function useFloatingWindows() {
       unlisten.then((fn) => fn());
     };
   }, [updateTaskPositionLocal, getTaskById]);
+
+  // Handle note-hidden event from floating windows
+  useEffect(() => {
+    const unlisten = listen('note-hidden', async (event: any) => {
+      const { noteId } = event.payload;
+      console.log('[useFloatingWindows] Received note-hidden event for:', noteId);
+
+      // Immediately remove from tracked windows to prevent race conditions
+      if (openWindowsRef.current.has(noteId)) {
+        console.log('[useFloatingWindows] Removing note from tracked windows:', noteId);
+        openWindowsRef.current.delete(noteId);
+      }
+
+      try {
+        await updateNote({ id: noteId, isVisible: false });
+        console.log('[useFloatingWindows] Note isVisible updated to false:', noteId);
+      } catch (error) {
+        console.error('[useFloatingWindows] Failed to hide note:', error);
+      }
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [updateNote]);
+
+  // Handle note position change from floating windows
+  useEffect(() => {
+    const unlisten = listen('note-position-changed', (event: any) => {
+      const { noteId, position_x, position_y, width, height } = event.payload;
+      console.log('[useFloatingWindows] Received note-position-changed event:', noteId, { position_x, position_y, width, height });
+      // Get current note to fill in missing values
+      const currentNote = getNoteById(noteId);
+      if (currentNote) {
+        updateNotePositionLocal(
+          noteId,
+          position_x ?? currentNote.windowX,
+          position_y ?? currentNote.windowY,
+          width ?? currentNote.windowWidth,
+          height ?? currentNote.windowHeight
+        );
+      }
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [updateNotePositionLocal, getNoteById]);
 
   // Periodically ensure floating windows stay on top (every 5 seconds)
   useEffect(() => {

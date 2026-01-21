@@ -160,7 +160,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
                     tags: input.tags ?? t.tags,
                     due: input.due ?? t.due,
                     description: input.content ?? t.description,
-                    isVisible: input.isVisible ?? t.isVisible,
+                    isVisible: input.isVisible ?? input.float?.show ?? t.isVisible,
                     windowX: input.float?.x ?? t.windowX,
                     windowY: input.float?.y ?? t.windowY,
                     windowWidth: input.float?.w ?? t.windowWidth,
