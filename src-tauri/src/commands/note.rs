@@ -301,10 +301,20 @@ pub fn updateNote(storage: State<'_, StorageState>, input: UpdateNoteInput) -> R
 
     let mut fm = note.frontmatter.clone();
     let mut body = note.content.clone();
+    let mut newPath = note.path.clone();
 
-    if let Some(title) = input.title {
+    // Handle title change - also update the filename
+    if let Some(ref title) = input.title {
         println!("[updateNote] Updating title to: {}", title);
-        fm.title = title;
+        fm.title = title.clone();
+
+        // Generate new slug from the new title and update filename
+        let newSlug = slugify(title);
+        if newSlug != note.slug {
+            let newFilename = toFilename(note.rank, &newSlug, false);
+            newPath = note.folderPath.join(&newFilename);
+            println!("[updateNote] Renaming file: {} -> {}", note.path.display(), newPath.display());
+        }
     }
     if let Some(content) = input.content {
         println!("[updateNote] Updating content ({} bytes)", content.len());
@@ -330,7 +340,15 @@ pub fn updateNote(storage: State<'_, StorageState>, input: UpdateNoteInput) -> R
     fm.updated = chrono::Utc::now().timestamp_millis();
 
     let content = toMarkdown(&fm, &body)?;
-    fs::write(&note.path, content).map_err(|e| {
+
+    // If path changed (title was updated), remove old file and write new
+    if newPath != note.path {
+        fs::remove_file(&note.path).map_err(|e| {
+            println!("[updateNote] ERROR removing old file: {}", e);
+            e.to_string()
+        })?;
+    }
+    fs::write(&newPath, content).map_err(|e| {
         println!("[updateNote] ERROR writing file: {}", e);
         e.to_string()
     })?;

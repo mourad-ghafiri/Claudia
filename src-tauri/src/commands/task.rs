@@ -285,7 +285,7 @@ pub struct UpdateTaskInput {
 pub fn updateTask(storage: State<'_, StorageState>, input: UpdateTaskInput) -> Result<(), String> {
     let wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
     let tasks = scanAllTasks(&foldersDir(&wsPath));
-    
+
     let task = tasks.iter()
         .find(|t| t.frontmatter.id == input.id)
         .ok_or("Task not found")?;
@@ -293,9 +293,12 @@ pub fn updateTask(storage: State<'_, StorageState>, input: UpdateTaskInput) -> R
     let mut fm = task.frontmatter.clone();
     let mut body = task.content.clone();
     let mut newPath = task.path.clone();
+    let mut newSlug = task.slug.clone();
 
-    if let Some(title) = input.title {
-        fm.title = title;
+    // Handle title change - also update the slug for filename
+    if let Some(ref title) = input.title {
+        fm.title = title.clone();
+        newSlug = slugify(title);
     }
     if let Some(content) = input.content {
         body = content;
@@ -316,23 +319,35 @@ pub fn updateTask(storage: State<'_, StorageState>, input: UpdateTaskInput) -> R
         fm.float = float;
     }
 
-    // Handle status change (move file)
-    if let Some(newStatusStr) = input.status {
-        if let Some(newStatus) = TaskStatus::fromFolder(&newStatusStr) {
-            if newStatus != task.status {
-                let newStatusPath = task.folderPath.join(newStatus.folderName());
-                fs::create_dir_all(&newStatusPath).map_err(|e| e.to_string())?;
-                
-                let filename = task.path.file_name().ok_or("No filename")?;
-                newPath = newStatusPath.join(filename);
-            }
-        }
+    // Determine the target status folder
+    let targetStatus = input.status
+        .as_ref()
+        .and_then(|s| TaskStatus::fromFolder(s))
+        .unwrap_or(task.status);
+
+    let statusChanged = targetStatus != task.status;
+    let slugChanged = newSlug != task.slug;
+
+    // Handle status change and/or title change (move/rename file)
+    if statusChanged || slugChanged {
+        let targetStatusPath = if statusChanged {
+            task.folderPath.join(targetStatus.folderName())
+        } else {
+            task.path.parent().unwrap().to_path_buf()
+        };
+
+        fs::create_dir_all(&targetStatusPath).map_err(|e| e.to_string())?;
+
+        let newFilename = toFilename(task.rank, &newSlug, false);
+        newPath = targetStatusPath.join(&newFilename);
+
+        println!("[updateTask] Renaming/moving file: {} -> {}", task.path.display(), newPath.display());
     }
 
     fm.updated = chrono::Utc::now().timestamp_millis();
 
     let content = toMarkdown(&fm, &body)?;
-    
+
     // If path changed, remove old and write new
     if newPath != task.path {
         fs::remove_file(&task.path).map_err(|e| e.to_string())?;
