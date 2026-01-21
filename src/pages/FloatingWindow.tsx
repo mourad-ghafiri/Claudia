@@ -243,7 +243,15 @@ export function FloatingWindow() {
         if (itemType === 'task') {
           const fetchedTask = await invoke<any>('getTaskById', { id: itemId });
           if (fetchedTask) {
+            // Also fetch task content (description)
+            let description = '';
+            try {
+              description = await invoke<string>('getTaskContent', { id: itemId });
+            } catch {
+              description = '';
+            }
             const transformed = transformTask(fetchedTask);
+            transformed.description = description;
             console.log('[FloatingWindow] Task fetched');
             setTask(transformed);
 

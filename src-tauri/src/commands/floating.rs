@@ -59,14 +59,19 @@ pub fn createFloatingWindow(app: tauri::AppHandle, config: FloatingWindowConfig)
             e.to_string()
         })?;
 
-    // Apply vibrancy with rounded corners on macOS
+    // Apply vibrancy with rounded corners on macOS only when opacity is 1.0 (fully opaque)
+    // Otherwise, let CSS handle the transparency with backdrop-filter
     #[cfg(target_os = "macos")]
     {
-        // Use HudWindow for a subtle frosted glass effect with 16px corner radius
-        if let Err(e) = apply_vibrancy(&window, NSVisualEffectMaterial::HudWindow, None, Some(16.0)) {
-            println!("[createFloatingWindow] Warning: Could not apply vibrancy: {}", e);
+        if config.opacity >= 0.99 {
+            // Use HudWindow for a subtle frosted glass effect with 16px corner radius
+            if let Err(e) = apply_vibrancy(&window, NSVisualEffectMaterial::HudWindow, None, Some(16.0)) {
+                println!("[createFloatingWindow] Warning: Could not apply vibrancy: {}", e);
+            } else {
+                println!("[createFloatingWindow] Applied vibrancy with rounded corners (opacity = {})", config.opacity);
+            }
         } else {
-            println!("[createFloatingWindow] Applied vibrancy with rounded corners");
+            println!("[createFloatingWindow] Skipping vibrancy (opacity = {}), using CSS transparency", config.opacity);
         }
     }
 
