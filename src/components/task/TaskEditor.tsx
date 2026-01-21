@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useEditor, EditorContent } from '@tiptap/react';
-import { Bold, Italic, Strikethrough, Code, List, ListOrdered, Quote } from 'lucide-react';
+import Editor from '@monaco-editor/react';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { ColorPicker } from '../ui/ColorPicker';
@@ -10,35 +9,8 @@ import { TagInput } from '../ui/TagInput';
 import { useTaskStore } from '../../stores/taskStore';
 import { useFolderStore } from '../../stores/folderStore';
 import { useUIStore } from '../../stores/uiStore';
-import { getEditorExtensions } from '../../lib/editor';
 import type { TaskStatus } from '../../types';
 import toast from 'react-hot-toast';
-
-interface ToolbarButtonProps {
-    onClick: () => void;
-    isActive?: boolean;
-    children: React.ReactNode;
-    title?: string;
-}
-
-function ToolbarButton({ onClick, isActive, children, title }: ToolbarButtonProps) {
-    return (
-        <button
-            type="button"
-            onClick={onClick}
-            title={title}
-            className={`
-        p-1.5 rounded-lg transition-colors
-        ${isActive
-                    ? 'bg-[#DA7756]/10 text-[#DA7756]'
-                    : 'hover:bg-[#F5F3F0] dark:hover:bg-[#393939] text-[#6B6B6B] dark:text-[#B5AFA6]'
-                }
-      `}
-        >
-            {children}
-        </button>
-    );
-}
 
 export function TaskEditor({ taskId: propTaskId, embedded = false }: { taskId?: string; embedded?: boolean }) {
     const { createTask, updateTask, getTaskById } = useTaskStore();
@@ -46,6 +18,7 @@ export function TaskEditor({ taskId: propTaskId, embedded = false }: { taskId?: 
     const { isTaskEditorOpen, editingTaskId, pendingTaskTemplate, closeTaskEditor } = useUIStore();
 
     const [title, setTitle] = useState('');
+    const [description, setDescription] = useState('');
     const [color, setColor] = useState('#3B82F6');
     const [due, setDue] = useState<number | null>(null);
     const [status, setStatus] = useState<TaskStatus>('todo');
@@ -57,16 +30,6 @@ export function TaskEditor({ taskId: propTaskId, embedded = false }: { taskId?: 
     const taskIdToUse = propTaskId || editingTaskId;
     const existingTask = taskIdToUse ? getTaskById(taskIdToUse) : null;
 
-    const editor = useEditor({
-        extensions: getEditorExtensions('Add task description...'),
-        content: '',
-        editorProps: {
-            attributes: {
-                class: 'tiptap prose prose-sm dark:prose-invert max-w-none focus:outline-none min-h-[150px]',
-            },
-        },
-    });
-
     // Initialize form when modal opens or when taskId changes (embedded mode)
     useEffect(() => {
         if (embedded || isTaskEditorOpen) {
@@ -77,7 +40,7 @@ export function TaskEditor({ taskId: propTaskId, embedded = false }: { taskId?: 
                 setDue(existingTask.due);
                 setStatus(existingTask.status);
                 setFolderPath(existingTask.folderPath);
-                editor?.commands.setContent(existingTask.description);
+                setDescription(existingTask.description);
                 // Tags are now string arrays directly
                 setTags(existingTask.tags || []);
             } else if (pendingTaskTemplate) {
@@ -88,7 +51,7 @@ export function TaskEditor({ taskId: propTaskId, embedded = false }: { taskId?: 
                 setStatus('todo');
                 setFolderPath(currentFolderPath);
                 setTags([]);
-                editor?.commands.setContent(pendingTaskTemplate.content);
+                setDescription(pendingTaskTemplate.content);
             } else {
                 // New blank task - use current folder
                 setTitle('');
@@ -97,13 +60,13 @@ export function TaskEditor({ taskId: propTaskId, embedded = false }: { taskId?: 
                 setStatus('todo');
                 setFolderPath(currentFolderPath);
                 setTags([]);
-                editor?.commands.setContent('');
+                setDescription('');
             }
         }
-    }, [embedded, isTaskEditorOpen, existingTask?.id, editor, propTaskId, currentFolderPath, pendingTaskTemplate]);
+    }, [embedded, isTaskEditorOpen, existingTask?.id, propTaskId, currentFolderPath, pendingTaskTemplate]);
 
     // Handle save
-    const handleSave = async () => {
+    const handleSave = useCallback(async () => {
         if (!title.trim()) {
             toast.error('Please enter a title');
             return;
@@ -111,8 +74,6 @@ export function TaskEditor({ taskId: propTaskId, embedded = false }: { taskId?: 
 
         setIsSaving(true);
         try {
-            const description = editor?.getHTML() || '';
-
             if (existingTask) {
                 await updateTask({
                     id: existingTask.id,
@@ -144,7 +105,7 @@ export function TaskEditor({ taskId: propTaskId, embedded = false }: { taskId?: 
         } finally {
             setIsSaving(false);
         }
-    };
+    }, [title, description, color, due, status, tags, existingTask, folderPath, embedded, createTask, updateTask, closeTaskEditor]);
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
         if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -156,8 +117,6 @@ export function TaskEditor({ taskId: propTaskId, embedded = false }: { taskId?: 
             handleSave();
         }
     }, [handleSave]);
-
-    if (!editor) return null;
 
     const editorContent = (
         <div className="p-6 space-y-4" onKeyDown={handleKeyDown}>
@@ -222,68 +181,34 @@ export function TaskEditor({ taskId: propTaskId, embedded = false }: { taskId?: 
                 </div>
             </div>
 
-            {/* Toolbar */}
-            <div className="flex flex-wrap gap-1 p-2 bg-[#F5F3F0] dark:bg-[#2E2E2E] rounded-xl border border-[#EBE8E4] dark:border-[#393939]">
-                <ToolbarButton
-                    onClick={() => editor.chain().focus().toggleBold().run()}
-                    isActive={editor.isActive('bold')}
-                    title="Bold (Cmd+B)"
-                >
-                    <Bold className="w-4 h-4" />
-                </ToolbarButton>
-                <ToolbarButton
-                    onClick={() => editor.chain().focus().toggleItalic().run()}
-                    isActive={editor.isActive('italic')}
-                    title="Italic (Cmd+I)"
-                >
-                    <Italic className="w-4 h-4" />
-                </ToolbarButton>
-                <ToolbarButton
-                    onClick={() => editor.chain().focus().toggleStrike().run()}
-                    isActive={editor.isActive('strike')}
-                    title="Strikethrough"
-                >
-                    <Strikethrough className="w-4 h-4" />
-                </ToolbarButton>
-                <ToolbarButton
-                    onClick={() => editor.chain().focus().toggleCode().run()}
-                    isActive={editor.isActive('code')}
-                    title="Code"
-                >
-                    <Code className="w-4 h-4" />
-                </ToolbarButton>
-
-                <div className="w-px h-6 bg-[#D8D3CC] dark:bg-[#4A4A4A] mx-1" />
-
-                <ToolbarButton
-                    onClick={() => editor.chain().focus().toggleBulletList().run()}
-                    isActive={editor.isActive('bulletList')}
-                    title="Bullet List"
-                >
-                    <List className="w-4 h-4" />
-                </ToolbarButton>
-                <ToolbarButton
-                    onClick={() => editor.chain().focus().toggleOrderedList().run()}
-                    isActive={editor.isActive('orderedList')}
-                    title="Numbered List"
-                >
-                    <ListOrdered className="w-4 h-4" />
-                </ToolbarButton>
-
-                <div className="w-px h-6 bg-[#D8D3CC] dark:bg-[#4A4A4A] mx-1" />
-
-                <ToolbarButton
-                    onClick={() => editor.chain().focus().toggleBlockquote().run()}
-                    isActive={editor.isActive('blockquote')}
-                    title="Quote"
-                >
-                    <Quote className="w-4 h-4" />
-                </ToolbarButton>
+            {/* Description Label */}
+            <div>
+                <label className="block text-xs font-medium text-[#6B6B6B] dark:text-[#B5AFA6] uppercase tracking-wider mb-1">
+                    Description (Markdown)
+                </label>
             </div>
 
-            {/* Editor */}
-            <div className="min-h-[150px] max-h-[300px] overflow-y-auto border border-[#EBE8E4] dark:border-[#393939] rounded-xl">
-                <EditorContent editor={editor} />
+            {/* Monaco Editor */}
+            <div className="h-[200px] border border-[#EBE8E4] dark:border-[#393939] rounded-xl overflow-hidden">
+                <Editor
+                    height="100%"
+                    defaultLanguage="markdown"
+                    theme="vs-dark"
+                    value={description}
+                    onChange={(value) => setDescription(value || '')}
+                    options={{
+                        minimap: { enabled: false },
+                        fontSize: 14,
+                        wordWrap: 'on',
+                        padding: { top: 12, bottom: 12 },
+                        scrollBeyondLastLine: false,
+                        lineNumbers: 'off',
+                        folding: false,
+                        glyphMargin: false,
+                        lineDecorationsWidth: 0,
+                        lineNumbersMinChars: 0,
+                    }}
+                />
             </div>
 
             {/* Actions - only show in modal mode */}
