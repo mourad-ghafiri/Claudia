@@ -17,7 +17,8 @@ import { useUIStore } from '../stores/uiStore';
 import { FolderSidebar } from '../components/layout/FolderSidebar';
 import { KanbanColumn } from '../components/kanban/KanbanColumn';
 import { KanbanCard } from '../components/kanban/KanbanCard';
-import type { Task, TaskStatus, FolderInfo } from '../types';
+import { TemplateSelector } from '../components/template/TemplateSelector';
+import type { Task, TaskStatus, FolderInfo, TemplateInfo } from '../types';
 import toast from 'react-hot-toast';
 
 const columns: { id: TaskStatus; title: string; color: string }[] = [
@@ -29,9 +30,18 @@ const columns: { id: TaskStatus; title: string; color: string }[] = [
 export function TasksView() {
     const { tasks, fetchTasks, fetchTasksByFolder, updateTask, getTasksByStatus, moveTaskToFolder } = useTaskStore();
     const { currentFolderPath, setCurrentFolder, folders, reorderFolders } = useFolderStore();
-    const { openTaskEditor, searchQuery } = useUIStore();
+    const { openTaskEditorWithTemplate, searchQuery } = useUIStore();
     const [activeTask, setActiveTask] = useState<Task | null>(null);
     const [draggedFolder, setDraggedFolder] = useState<FolderInfo | null>(null);
+    const [showTemplateSelector, setShowTemplateSelector] = useState(false);
+
+    const handleNewTask = useCallback(() => {
+        setShowTemplateSelector(true);
+    }, []);
+
+    const handleTemplateSelect = useCallback((content: string, templateInfo: TemplateInfo) => {
+        openTaskEditorWithTemplate(content, templateInfo.color, templateInfo.name);
+    }, [openTaskEditorWithTemplate]);
 
     const sensors = useSensors(
         useSensor(PointerSensor, {
@@ -221,7 +231,7 @@ export function TasksView() {
                     <div className="p-3 border-b border-[#EBE8E4] dark:border-[#2E2E2E] flex items-center justify-between bg-white dark:bg-[#242424]">
                         <h2 className="font-semibold text-[#2D2D2D] dark:text-[#E8E6E3]">Tasks</h2>
                         <button
-                            onClick={() => openTaskEditor()}
+                            onClick={handleNewTask}
                             className="p-1.5 hover:bg-[#F5F3F0] dark:hover:bg-[#2E2E2E] rounded-lg transition-colors"
                             title="New Task"
                         >
@@ -258,6 +268,14 @@ export function TasksView() {
                         </div>
                     )}
                 </DragOverlay>
+
+                {/* Template Selector Modal */}
+                <TemplateSelector
+                    isOpen={showTemplateSelector}
+                    onClose={() => setShowTemplateSelector(false)}
+                    onSelect={handleTemplateSelect}
+                    templateType="tasks"
+                />
             </div>
         </DndContext>
     );

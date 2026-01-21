@@ -43,7 +43,7 @@ function ToolbarButton({ onClick, isActive, children, title }: ToolbarButtonProp
 export function TaskEditor({ taskId: propTaskId, embedded = false }: { taskId?: string; embedded?: boolean }) {
     const { createTask, updateTask, getTaskById } = useTaskStore();
     const { currentFolderPath } = useFolderStore();
-    const { isTaskEditorOpen, editingTaskId, closeTaskEditor } = useUIStore();
+    const { isTaskEditorOpen, editingTaskId, pendingTaskTemplate, closeTaskEditor } = useUIStore();
 
     const [title, setTitle] = useState('');
     const [color, setColor] = useState('#3B82F6');
@@ -80,6 +80,15 @@ export function TaskEditor({ taskId: propTaskId, embedded = false }: { taskId?: 
                 editor?.commands.setContent(existingTask.description);
                 // Tags are now string arrays directly
                 setTags(existingTask.tags || []);
+            } else if (pendingTaskTemplate) {
+                // New task from template
+                setTitle(pendingTaskTemplate.title === 'Blank Task' ? '' : pendingTaskTemplate.title);
+                setColor(pendingTaskTemplate.color || '#3B82F6');
+                setDue(null);
+                setStatus('todo');
+                setFolderPath(currentFolderPath);
+                setTags([]);
+                editor?.commands.setContent(pendingTaskTemplate.content);
             } else {
                 // New blank task - use current folder
                 setTitle('');
@@ -91,7 +100,7 @@ export function TaskEditor({ taskId: propTaskId, embedded = false }: { taskId?: 
                 editor?.commands.setContent('');
             }
         }
-    }, [embedded, isTaskEditorOpen, existingTask?.id, editor, propTaskId, currentFolderPath]);
+    }, [embedded, isTaskEditorOpen, existingTask?.id, editor, propTaskId, currentFolderPath, pendingTaskTemplate]);
 
     // Handle save
     const handleSave = async () => {

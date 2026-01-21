@@ -7,6 +7,7 @@ pub mod folder;
 pub mod note;
 pub mod password;
 pub mod task;
+pub mod template;
 
 pub use common::{FloatWindow, TaskStatus};
 pub use config::{Settings, SettingsOverride, WorkspaceEntry};
@@ -14,4 +15,5 @@ pub use folder::{Folder, FolderFrontmatter};
 pub use note::{Note, NoteFrontmatter};
 pub use password::{Password, PasswordFrontmatter, PasswordContent};
 pub use task::{Task, TaskFrontmatter};
+pub use template::{Template, TemplateFrontmatter, TemplateType};
 

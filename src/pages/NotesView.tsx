@@ -3,13 +3,14 @@ import { motion } from 'framer-motion';
 import { Plus, Trash2, Pin, Edit2, ChevronRight, Eye, EyeOff, FileText, Palette, Folder as FolderIcon } from 'lucide-react';
 import { useNoteStore } from '../stores/noteStore';
 import { useFolderStore } from '../stores/folderStore';
-import type { FolderInfo } from '../types';
+import type { FolderInfo, TemplateInfo } from '../types';
 import { useUIStore } from '../stores/uiStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { FolderSidebar } from '../components/layout/FolderSidebar';
 import { Button } from '../components/ui/Button';
 import { ColorPicker } from '../components/ui/ColorPicker';
 import { TagInput } from '../components/ui/TagInput';
+import { TemplateSelector } from '../components/template/TemplateSelector';
 import { createFloatingWindow, closeFloatingWindow } from '../lib/tauri';
 import { listen } from '@tauri-apps/api/event';
 import toast from 'react-hot-toast';
@@ -505,6 +506,8 @@ export function NotesView() {
     const [localVisibleStates, setLocalVisibleStates] = useState<Record<string, boolean>>({});
     const togglingRef = useRef<string | null>(null);
     const titleInputRef = useRef<HTMLInputElement>(null);
+    // Template selector state
+    const [showTemplateSelector, setShowTemplateSelector] = useState(false);
 
     // Sync local visible states with notes
     useEffect(() => {
@@ -625,19 +628,24 @@ export function NotesView() {
         setSelectedNoteId(null);
     }, [setCurrentFolder, fetchNotesByFolder, fetchNotes, setSelectedNoteId]);
 
-    const handleNewNote = async () => {
-        // Create a new note directly and select it for editing
+    const handleNewNote = () => {
+        // Open template selector
+        setShowTemplateSelector(true);
+    };
+
+    const handleTemplateSelect = async (content: string, templateInfo: TemplateInfo) => {
+        // Create a new note with the template content
         try {
             const newNote = await createNote({
-                title: 'Untitled Note',
-                content: '',
+                title: templateInfo.name === 'Blank Note' ? 'Untitled Note' : templateInfo.name,
+                content: content,
                 folderPath: currentFolderPath,
-                color: '#6B9F78',
+                color: templateInfo.color || '#6B9F78',
             });
             // Select the new note and enter edit mode
             setSelectedNoteId(newNote.id);
             setEditingTitle(newNote.title);
-            setEditingContent('');
+            setEditingContent(content);
             setEditingColor(newNote.color || '#6B9F78');
             setEditingTags([]);
             setIsMetadataExpanded(false);
@@ -1028,6 +1036,14 @@ export function NotesView() {
                         </div>
                     )}
                 </DragOverlay>
+
+                {/* Template Selector Modal */}
+                <TemplateSelector
+                    isOpen={showTemplateSelector}
+                    onClose={() => setShowTemplateSelector(false)}
+                    onSelect={handleTemplateSelect}
+                    templateType="notes"
+                />
             </div>
         </DndContext>
     );

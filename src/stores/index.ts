@@ -7,3 +7,4 @@ export { usePasswordStore } from './passwordStore';
 export { useSettingsStore } from './settingsStore';
 export { useUIStore } from './uiStore';
 export { useMCPStore } from './mcpStore';
+export { useTemplateStore } from './templateStore';

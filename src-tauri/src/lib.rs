@@ -244,6 +244,10 @@ pub fn run() {
             commands::floating::updateFloatingWindowSize,
             commands::floating::getFloatingWindowPosition,
             commands::floating::getFloatingWindowSize,
+            // Templates
+            commands::template::getTemplates,
+            commands::template::getTemplateContent,
+            commands::template::initializeDefaultTemplates,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

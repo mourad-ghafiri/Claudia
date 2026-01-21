@@ -27,7 +27,9 @@ interface UIState {
     // Task Editor Modal
     isTaskEditorOpen: boolean;
     editingTaskId: string | null;
+    pendingTaskTemplate: { content: string; color: string; title: string } | null;
     openTaskEditor: (taskId?: string) => void;
+    openTaskEditorWithTemplate: (content: string, color: string, title: string) => void;
     closeTaskEditor: () => void;
 
     // Note Editor Modal
@@ -79,8 +81,14 @@ export const useUIStore = create<UIState>((set) => ({
     // Task Editor Modal
     isTaskEditorOpen: false,
     editingTaskId: null,
-    openTaskEditor: (taskId) => set({ isTaskEditorOpen: true, editingTaskId: taskId ?? null }),
-    closeTaskEditor: () => set({ isTaskEditorOpen: false, editingTaskId: null }),
+    pendingTaskTemplate: null,
+    openTaskEditor: (taskId) => set({ isTaskEditorOpen: true, editingTaskId: taskId ?? null, pendingTaskTemplate: null }),
+    openTaskEditorWithTemplate: (content, color, title) => set({
+        isTaskEditorOpen: true,
+        editingTaskId: null,
+        pendingTaskTemplate: { content, color, title }
+    }),
+    closeTaskEditor: () => set({ isTaskEditorOpen: false, editingTaskId: null, pendingTaskTemplate: null }),
 
     // Note Editor Modal
     isNoteEditorOpen: false,

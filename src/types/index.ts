@@ -214,6 +214,26 @@ export interface UpdatePasswordInput {
 }
 
 // ============================================
+// TEMPLATE TYPES
+// ============================================
+
+export type TemplateType = 'notes' | 'tasks';
+export type TemplateCategory = 'basic' | 'productivity' | 'planning' | 'documentation' | 'learning' | 'development' | 'operations';
+
+/** TemplateInfo from backend - matches Rust commands::template::TemplateInfo */
+export interface TemplateInfo {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  icon: string;
+  color: string;
+  order: number;
+  slug: string;
+  templateType: string;
+}
+
+// ============================================
 // SETTINGS TYPES
 // ============================================
 

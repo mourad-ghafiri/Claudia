@@ -8,4 +8,5 @@ pub mod note;
 pub mod password;
 pub mod settings;
 pub mod task;
+pub mod template;
 pub mod workspace;
