@@ -773,19 +773,22 @@ export function NotesView() {
 
         // Handle folder reordering
         if (wasDraggingFolder) {
-            if (activeId !== overId) {
+            // overId is in format "folder-{path}" from droppable
+            if (typeof overId === 'string' && overId.startsWith('folder-')) {
+                const targetFolderPath = overId.replace('folder-', '');
                 const folderPaths = folders.map(f => f.path);
                 const activeFolder = folders.find(f => f.id === activeId);
-                const overFolder = folders.find(f => f.id === overId);
-                if (!activeFolder || !overFolder) return;
+                const overFolder = folders.find(f => f.path === targetFolderPath);
 
-                const oldIndex = folderPaths.indexOf(activeFolder.path);
-                const newIndex = folderPaths.indexOf(overFolder.path);
+                if (activeFolder && overFolder && activeFolder.path !== overFolder.path) {
+                    const oldIndex = folderPaths.indexOf(activeFolder.path);
+                    const newIndex = folderPaths.indexOf(overFolder.path);
 
-                if (oldIndex !== -1 && newIndex !== -1) {
-                    const reorderedFolderPaths = arrayMove(folderPaths, oldIndex, newIndex);
-                    await reorderFolders(null, reorderedFolderPaths);
-                    toast.success('Folder reordered');
+                    if (oldIndex !== -1 && newIndex !== -1) {
+                        const reorderedFolderPaths = arrayMove(folderPaths, oldIndex, newIndex);
+                        await reorderFolders(null, reorderedFolderPaths);
+                        toast.success('Folder reordered');
+                    }
                 }
             }
             return;

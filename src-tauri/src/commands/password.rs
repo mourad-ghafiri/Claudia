@@ -515,21 +515,41 @@ pub struct ReorderPasswordsInput {
 
 #[tauri::command]
 pub fn reorderPasswords(storage: State<'_, StorageState>, input: ReorderPasswordsInput) -> Result<(), String> {
-    let _wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
-    let folderPath = PathBuf::from(&input.folderPath);
-    let passwords = scanPasswordsInFolder(&folderPath);
+    println!("[reorderPasswords] Called with folderPath: {}", input.folderPath);
+    println!("[reorderPasswords] Password IDs to reorder: {:?}", input.passwordIds);
+
+    let wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
+
+    // Determine the actual passwords directory
+    // If folderPath is provided, passwords are in {folderPath}/passwords/
+    // If empty, passwords are in the root passwords folder
+    let passwordsDir = if input.folderPath.is_empty() {
+        passwordsDir(&wsPath, "")
+    } else {
+        PathBuf::from(&input.folderPath).join("passwords")
+    };
+
+    println!("[reorderPasswords] Scanning passwords in: {:?}", passwordsDir);
+    let passwords = scanPasswordsInFolder(&passwordsDir);
+    println!("[reorderPasswords] Found {} passwords", passwords.len());
 
     for (index, passwordId) in input.passwordIds.iter().enumerate() {
         if let Some(password) = passwords.iter().find(|p| p.frontmatter.id == *passwordId) {
             let newRank = (index + 1) as u32;
             let newFilename = toFilename(newRank, &password.slug, false);
-            let newPath = folderPath.join(&newFilename);
+            // Use password.folderPath which is the actual directory where the password lives
+            let newPath = password.folderPath.join(&newFilename);
 
             if password.path != newPath {
-                fs::rename(&password.path, &newPath).map_err(|e| e.to_string())?;
+                println!("[reorderPasswords] Renaming {} -> {}", password.path.display(), newPath.display());
+                fs::rename(&password.path, &newPath).map_err(|e| {
+                    println!("[reorderPasswords] ERROR: {}", e);
+                    e.to_string()
+                })?;
             }
         }
     }
+    println!("[reorderPasswords] SUCCESS");
     Ok(())
 }
 

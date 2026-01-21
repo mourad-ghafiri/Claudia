@@ -9,14 +9,15 @@ import {
     DragStartEvent,
     DragEndEvent,
 } from '@dnd-kit/core';
-import { Plus } from 'lucide-react';
+import { arrayMove } from '@dnd-kit/sortable';
+import { Plus, Folder as FolderIcon } from 'lucide-react';
 import { useTaskStore } from '../stores/taskStore';
 import { useFolderStore } from '../stores/folderStore';
 import { useUIStore } from '../stores/uiStore';
 import { FolderSidebar } from '../components/layout/FolderSidebar';
 import { KanbanColumn } from '../components/kanban/KanbanColumn';
 import { KanbanCard } from '../components/kanban/KanbanCard';
-import type { Task, TaskStatus } from '../types';
+import type { Task, TaskStatus, FolderInfo } from '../types';
 import toast from 'react-hot-toast';
 
 const columns: { id: TaskStatus; title: string; color: string }[] = [
@@ -27,9 +28,10 @@ const columns: { id: TaskStatus; title: string; color: string }[] = [
 
 export function TasksView() {
     const { tasks, fetchTasks, fetchTasksByFolder, updateTask, getTasksByStatus, moveTaskToFolder } = useTaskStore();
-    const { currentFolderPath, setCurrentFolder } = useFolderStore();
+    const { currentFolderPath, setCurrentFolder, folders, reorderFolders } = useFolderStore();
     const { openTaskEditor, searchQuery } = useUIStore();
     const [activeTask, setActiveTask] = useState<Task | null>(null);
+    const [draggedFolder, setDraggedFolder] = useState<FolderInfo | null>(null);
 
     const sensors = useSensors(
         useSensor(PointerSensor, {
@@ -69,18 +71,57 @@ export function TasksView() {
     }, [setCurrentFolder, fetchTasksByFolder, fetchTasks]);
 
     const handleDragStart = useCallback((event: DragStartEvent) => {
-        const task = tasks.find((t) => t.id === event.active.id);
-        if (task) setActiveTask(task);
-    }, [tasks]);
+        const activeId = event.active.id as string;
+
+        // Check if it's a task
+        const task = tasks.find((t) => t.id === activeId);
+        if (task) {
+            setActiveTask(task);
+            setDraggedFolder(null);
+            return;
+        }
+
+        // Check if it's a folder
+        const folder = folders.find((f) => f.id === activeId);
+        if (folder) {
+            setDraggedFolder(folder);
+            setActiveTask(null);
+        }
+    }, [tasks, folders]);
 
     const handleDragEnd = useCallback(async (event: DragEndEvent) => {
         const { active, over } = event;
+        const wasDraggingFolder = draggedFolder !== null;
         setActiveTask(null);
+        setDraggedFolder(null);
 
         if (!over) return;
 
         const activeId = active.id as string;
         const overId = over.id as string;
+
+        // Handle folder reordering
+        if (wasDraggingFolder) {
+            // overId is in format "folder-{path}" from droppable
+            if (typeof overId === 'string' && overId.startsWith('folder-')) {
+                const targetFolderPath = overId.replace('folder-', '');
+                const folderPaths = folders.map(f => f.path);
+                const activeFolder = folders.find(f => f.id === activeId);
+                const overFolder = folders.find(f => f.path === targetFolderPath);
+
+                if (activeFolder && overFolder && activeFolder.path !== overFolder.path) {
+                    const oldIndex = folderPaths.indexOf(activeFolder.path);
+                    const newIndex = folderPaths.indexOf(overFolder.path);
+
+                    if (oldIndex !== -1 && newIndex !== -1) {
+                        const reorderedFolderPaths = arrayMove(folderPaths, oldIndex, newIndex);
+                        await reorderFolders(null, reorderedFolderPaths);
+                        toast.success('Folder reordered');
+                    }
+                }
+            }
+            return;
+        }
 
         // Handle dropping task onto a folder
         if (typeof overId === 'string' && overId.startsWith('folder-')) {
@@ -120,7 +161,7 @@ export function TasksView() {
                 status: overTask.status,
             });
         }
-    }, [tasks, moveTaskToFolder, updateTask]);
+    }, [tasks, folders, draggedFolder, moveTaskToFolder, updateTask, reorderFolders]);
 
     // Memoize filtered tasks by status for each column
     // When currentFolderPath is null (All Tasks), show ALL tasks regardless of folder
@@ -208,6 +249,12 @@ export function TasksView() {
                     {activeTask && (
                         <div className="opacity-90 rotate-3 w-72">
                             <KanbanCard task={activeTask} columnStatus={activeTask.status} />
+                        </div>
+                    )}
+                    {draggedFolder && (
+                        <div className="flex items-center gap-2 py-1.5 px-3 bg-white dark:bg-[#2E2E2E] rounded-lg shadow-lg border border-[#DA7756] opacity-90 pointer-events-none">
+                            <FolderIcon className="w-4 h-4 text-[#DA7756]" />
+                            <span className="text-sm text-[#2D2D2D] dark:text-[#E8E6E3]">{draggedFolder.name}</span>
                         </div>
                     )}
                 </DragOverlay>

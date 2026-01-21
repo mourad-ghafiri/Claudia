@@ -143,6 +143,8 @@ export const useFolderStore = create<FolderState>((set, get) => ({
 
         try {
             await invoke('reorderFolders', { input: { parentPath, folderPaths } });
+            // Refetch folders to get updated paths (rank prefix in folder name changes)
+            await get().fetchFolders();
         } catch (error) {
             console.error('Failed to reorder folders:', error);
             await get().fetchFolders();

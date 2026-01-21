@@ -1,7 +1,7 @@
 // Folder Sidebar with categories: Favorites, Pinned, All Folders
 import { useState, useEffect, useRef, useMemo, memo } from 'react';
-import { Home, PanelLeftClose, PanelLeft, Plus, ChevronDown, ChevronRight, Star, Pin, Folder, FolderOpen, MoreHorizontal, Pencil, Trash2, Palette, RefreshCw } from 'lucide-react';
-import { useDroppable } from '@dnd-kit/core';
+import { Home, PanelLeftClose, PanelLeft, Plus, ChevronDown, ChevronRight, Star, Pin, Folder, FolderOpen, MoreHorizontal, Pencil, Trash2, Palette, RefreshCw, GripVertical } from 'lucide-react';
+import { useDroppable, useDraggable } from '@dnd-kit/core';
 import { useFolderStore } from '../../stores/folderStore';
 import { useUIStore } from '../../stores/uiStore';
 import type { FolderInfo } from '../../types';
@@ -215,10 +215,35 @@ export const FolderSidebar = memo(function FolderSidebar({
         },
     };
 
-    // Render a single folder item with droppable support
-    const DroppableFolderItem = ({ folder, indent = 0 }: { folder: FolderInfo; indent?: number }) => {
+    // Render a single folder item with draggable (for reordering) and droppable (for note drops) support
+    const DraggableFolderItem = ({ folder, indent = 0, isDraggable = true }: { folder: FolderInfo; indent?: number; isDraggable?: boolean }) => {
         const isSelected = currentFolderPath === folder.path;
-        const { setNodeRef, isOver } = useDroppable({ id: `folder-${folder.path}` });
+
+        // Draggable hook for drag-and-drop reordering (uses folder.id)
+        const {
+            attributes,
+            listeners,
+            setNodeRef: setDraggableRef,
+            transform,
+            isDragging,
+        } = useDraggable({
+            id: folder.id,
+            disabled: !isDraggable,
+        });
+
+        // Droppable hook for receiving notes AND for folder reorder targets (uses folder-${folder.path})
+        const { setNodeRef: setDroppableRef, isOver } = useDroppable({ id: `folder-${folder.path}` });
+
+        // Combine refs
+        const setNodeRef = (node: HTMLElement | null) => {
+            setDraggableRef(node);
+            setDroppableRef(node);
+        };
+
+        const style = transform ? {
+            transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+            zIndex: isDragging ? 1000 : undefined,
+        } : undefined;
 
         return (
             <div
@@ -227,7 +252,8 @@ export const FolderSidebar = memo(function FolderSidebar({
                 onClick={() => handleFolderSelect(folder.path)}
                 onContextMenu={(e) => handleContextMenu(e, folder)}
                 className={`
-                    group flex items-center gap-2 py-1.5 px-2 mx-1 rounded-lg cursor-pointer transition-all duration-150
+                    group flex items-center gap-1 py-1.5 px-2 mx-1 rounded-lg cursor-pointer transition-all duration-150
+                    ${isDragging ? 'shadow-lg ring-2 ring-[#DA7756] opacity-50' : ''}
                     ${isSelected
                         ? 'bg-[#DA7756]/15 text-[#DA7756]'
                         : isOver
@@ -235,8 +261,19 @@ export const FolderSidebar = memo(function FolderSidebar({
                             : 'text-[#2D2D2D] dark:text-[#E8E6E3] hover:bg-[#EBE8E4] dark:hover:bg-[#2E2E2E]'
                     }
                 `}
-                style={{ paddingLeft: `${8 + indent * 16}px` }}
+                style={{ ...style, paddingLeft: `${8 + indent * 16}px` }}
             >
+                {/* Drag handle - only show for draggable folders */}
+                {isDraggable && (
+                    <div
+                        {...attributes}
+                        {...listeners}
+                        className="opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing p-0.5 -ml-1 hover:bg-[#D8D3CC] dark:hover:bg-[#393939] rounded transition-opacity"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <GripVertical className="w-3 h-3 text-[#B5AFA6] dark:text-[#6B6B6B]" />
+                    </div>
+                )}
                 {folder.color && (
                     <div
                         className="w-1 h-4 rounded-full flex-shrink-0"
@@ -263,10 +300,10 @@ export const FolderSidebar = memo(function FolderSidebar({
     };
 
     // Render folder with children
-    const renderFolderWithChildren = (folder: FolderInfo, indent: number = 0) => (
+    const renderFolderWithChildren = (folder: FolderInfo, indent: number = 0, isDraggable: boolean = true) => (
         <div key={folder.path}>
-            <DroppableFolderItem folder={folder} indent={indent} />
-            {folder.children?.map(child => renderFolderWithChildren(child, indent + 1))}
+            <DraggableFolderItem folder={folder} indent={indent} isDraggable={isDraggable && indent === 0} />
+            {folder.children?.map(child => renderFolderWithChildren(child, indent + 1, false))}
         </div>
     );
 
@@ -277,7 +314,8 @@ export const FolderSidebar = memo(function FolderSidebar({
         items: FolderInfo[],
         expanded: boolean,
         setExpanded: (v: boolean) => void,
-        flat: boolean = false
+        flat: boolean = false,
+        draggable: boolean = false
     ) => {
         if (items.length === 0) return null;
 
@@ -295,8 +333,8 @@ export const FolderSidebar = memo(function FolderSidebar({
                 {expanded && (
                     <div className="mt-1">
                         {flat
-                            ? items.map(f => <DroppableFolderItem key={f.path} folder={f} />)
-                            : items.map(f => renderFolderWithChildren(f))
+                            ? items.map(f => <DraggableFolderItem key={f.path} folder={f} isDraggable={false} />)
+                            : items.map(f => renderFolderWithChildren(f, 0, draggable))
                         }
                     </div>
                 )}
@@ -381,12 +419,12 @@ export const FolderSidebar = memo(function FolderSidebar({
 
                 {!isSidebarCollapsed && (
                     <>
-                        {renderSection('Favorites', <Star className="w-3 h-3 text-[#D4A72C]" />, favoriteFolders, favoritesExpanded, setFavoritesExpanded, true)}
-                        {renderSection('Pinned', <Pin className="w-3 h-3 text-[#5B8DEF]" />, pinnedFolders, pinnedExpanded, setPinnedExpanded, true)}
+                        {renderSection('Favorites', <Star className="w-3 h-3 text-[#D4A72C]" />, favoriteFolders, favoritesExpanded, setFavoritesExpanded, true, false)}
+                        {renderSection('Pinned', <Pin className="w-3 h-3 text-[#5B8DEF]" />, pinnedFolders, pinnedExpanded, setPinnedExpanded, true, false)}
                         {(favoriteFolders.length > 0 || pinnedFolders.length > 0) && regularFolders.length > 0 && (
                             <div className="h-px bg-[#EBE8E4] dark:bg-[#2E2E2E] mx-3 my-2" />
                         )}
-                        {renderSection('Folders', <Folder className="w-3 h-3" />, regularFolders, foldersExpanded, setFoldersExpanded, false)}
+                        {renderSection('Folders', <Folder className="w-3 h-3" />, regularFolders, foldersExpanded, setFoldersExpanded, false, true)}
 
                         {folders.length === 0 && (
                             <div className="text-center py-8 px-4">

@@ -389,15 +389,27 @@ pub fn reorderNotes(storage: State<'_, StorageState>, input: ReorderNotesInput) 
     println!("[reorderNotes] Called with folderPath: {}", input.folderPath);
     println!("[reorderNotes] Note IDs to reorder: {:?}", input.noteIds);
 
-    let _wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
-    let folderPath = PathBuf::from(&input.folderPath);
-    let notes = scanNotesInFolder(&folderPath);
+    let wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
+
+    // Determine the actual notes directory
+    // If folderPath is provided, notes are in {folderPath}/notes/
+    // If empty, notes are in the root notes folder
+    let notesDir = if input.folderPath.is_empty() {
+        notesDir(&wsPath, "")
+    } else {
+        PathBuf::from(&input.folderPath).join("notes")
+    };
+
+    println!("[reorderNotes] Scanning notes in: {:?}", notesDir);
+    let notes = scanNotesInFolder(&notesDir);
+    println!("[reorderNotes] Found {} notes", notes.len());
 
     for (index, noteId) in input.noteIds.iter().enumerate() {
         if let Some(note) = notes.iter().find(|n| n.frontmatter.id == *noteId) {
             let newRank = (index + 1) as u32;
             let newFilename = toFilename(newRank, &note.slug, false);
-            let newPath = folderPath.join(&newFilename);
+            // Use note.folderPath which is the actual directory where the note lives
+            let newPath = note.folderPath.join(&newFilename);
 
             if note.path != newPath {
                 println!("[reorderNotes] Renaming {} -> {}", note.path.display(), newPath.display());
