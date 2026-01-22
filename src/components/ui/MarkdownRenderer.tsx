@@ -1,7 +1,8 @@
-import { memo, useState, useEffect, useRef } from 'react';
+import { memo, useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import mermaid from 'mermaid';
+import { openUrl } from '@tauri-apps/plugin-opener';
 
 // Global cache for mermaid renders to avoid re-rendering same diagrams
 const mermaidCache = new Map<string, string>();
@@ -207,9 +208,34 @@ const CodeBlock = memo(function CodeBlock({ children, className, ...rest }: any)
     return <SimpleCodeBlock className={className} {...rest}>{children}</SimpleCodeBlock>;
 });
 
+// Link component that opens URLs in system browser (works on all platforms)
+const ExternalLink = memo(function ExternalLink({ href, children, ...rest }: any) {
+    const handleClick = useCallback((e: React.MouseEvent) => {
+        e.preventDefault();
+        if (href) {
+            // Use Tauri opener plugin to open in system browser
+            openUrl(href).catch((err) => {
+                console.error('Failed to open link:', err);
+            });
+        }
+    }, [href]);
+
+    return (
+        <a
+            href={href}
+            onClick={handleClick}
+            className="text-[#DA7756] hover:text-[#C56545] underline cursor-pointer"
+            {...rest}
+        >
+            {children}
+        </a>
+    );
+});
+
 // Memoized markdown components object - defined once outside render
 const markdownComponents = {
     code: CodeBlock,
+    a: ExternalLink,
 };
 
 interface MarkdownRendererProps {
