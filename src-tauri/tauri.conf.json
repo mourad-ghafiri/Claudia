@@ -27,7 +27,7 @@
         "skipTaskbar": true
       }
     ],
-    "security": {
+"security": {
       "csp": null
     }
   },

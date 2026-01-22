@@ -2,6 +2,7 @@ import { memo, useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import mermaid from 'mermaid';
+import DOMPurify from 'dompurify';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
 // Global cache for mermaid renders to avoid re-rendering same diagrams
@@ -31,11 +32,11 @@ function setMermaidCache(key: string, value: string) {
     mermaidCache.set(key, value);
 }
 
-// Initialize mermaid once
+// Initialize mermaid once with strict security
 mermaid.initialize({
     startOnLoad: false,
     theme: 'neutral',
-    securityLevel: 'loose',
+    securityLevel: 'strict',
     suppressErrorRendering: true,
     themeVariables: {
         background: 'transparent',
@@ -165,8 +166,14 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
             try {
                 const { svg } = await Promise.race([renderPromise, timeoutPromise]);
                 if (isMounted) {
-                    setMermaidCache(code, svg);
-                    setSvg(svg);
+                    // Sanitize SVG to prevent XSS attacks
+                    const sanitizedSvg = DOMPurify.sanitize(svg, {
+                        USE_PROFILES: { svg: true, svgFilters: true },
+                        ADD_TAGS: ['use'],
+                        ADD_ATTR: ['xlink:href', 'xml:space'],
+                    });
+                    setMermaidCache(code, sanitizedSvg);
+                    setSvg(sanitizedSvg);
                 }
             } catch (error) {
                 if (isMounted) {
@@ -314,21 +321,10 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     className = '',
     maxChars = -1
 }: MarkdownRendererProps) {
-    const [isReady, setIsReady] = useState(false);
-    const [displayContent, setDisplayContent] = useState('');
+    // Truncate synchronously - it's fast enough for typical content
+    const displayContent = truncateMarkdown(content, maxChars);
 
-    useEffect(() => {
-        setIsReady(false);
-        // Defer markdown parsing to next frame to not block UI
-        const timeoutId = requestAnimationFrame(() => {
-            const truncated = truncateMarkdown(content, maxChars);
-            setDisplayContent(truncated);
-            setIsReady(true);
-        });
-        return () => cancelAnimationFrame(timeoutId);
-    }, [content, maxChars]);
-
-    if (!isReady || !displayContent) {
+    if (!displayContent) {
         return null;
     }
 

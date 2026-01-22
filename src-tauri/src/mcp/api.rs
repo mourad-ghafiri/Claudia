@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use crate::storage::{StorageState, foldersDir, notesDir, tasksDir, toFilename, slugify, toMarkdown};
+use crate::storage::{StorageState, foldersDir, notesDir, tasksDir, toFilename, slugify, toMarkdown, validateFolderPath};
 // Note: notesDir and tasksDir are used for root-level paths
 use crate::models::{Note, NoteFrontmatter, Task, TaskFrontmatter, TaskStatus, Folder, FolderFrontmatter, FloatWindow};
 use crate::commands::common::newId;
@@ -21,9 +21,14 @@ pub fn get_notes(storage: &StorageState, folder_path: Option<&str>) -> Vec<NoteI
 
     let notes = match folder_path {
         Some(fp) if !fp.is_empty() => {
-            // Scan the notes subdirectory within the specified folder
-            let notesSubdir = PathBuf::from(fp).join("notes");
-            scanNotesInFolder(&notesSubdir)
+            // Validate and scan the notes subdirectory within the specified folder
+            match validateFolderPath(&wsPath, fp) {
+                Ok(validatedPath) => {
+                    let notesSubdir = validatedPath.join("notes");
+                    scanNotesInFolder(&notesSubdir)
+                }
+                Err(_) => return Vec::new(), // Invalid path, return empty
+            }
         }
         _ => {
             // Scan all notes across all folders
@@ -58,9 +63,12 @@ pub fn create_note(
 
     // If folder_path is provided, create notes in folder_path/notes/
     // Otherwise use the root workspace/folders/notes/
+    // Validate path to prevent directory traversal attacks
     let notesSubdir = match folder_path {
-        Some(p) if !p.is_empty() && p != "null" && p.starts_with('/') => {
-            PathBuf::from(p).join("notes")
+        Some(p) if !p.is_empty() && p != "null" => {
+            // Validate the folder path is within workspace
+            let validatedPath = validateFolderPath(&wsPath, p)?;
+            validatedPath.join("notes")
         }
         _ => notesDir(&wsPath, ""),
     };
@@ -187,9 +195,14 @@ pub fn get_tasks(storage: &StorageState, folder_path: Option<&str>, status_filte
 
     let tasks = match folder_path {
         Some(fp) if !fp.is_empty() => {
-            // Scan the tasks subdirectory within the specified folder
-            let tasksSubdir = PathBuf::from(fp).join("tasks");
-            scanTasksInFolder(&tasksSubdir)
+            // Validate and scan the tasks subdirectory within the specified folder
+            match validateFolderPath(&wsPath, fp) {
+                Ok(validatedPath) => {
+                    let tasksSubdir = validatedPath.join("tasks");
+                    scanTasksInFolder(&tasksSubdir)
+                }
+                Err(_) => return Vec::new(), // Invalid path, return empty
+            }
         }
         _ => {
             // Scan all tasks across all folders
@@ -232,9 +245,12 @@ pub fn create_task(
 
     // If folder_path is provided, create tasks in folder_path/tasks/
     // Otherwise use the root workspace/folders/tasks/
+    // Validate path to prevent directory traversal attacks
     let tasksSubdir = match folder_path {
-        Some(p) if !p.is_empty() && p != "null" && p.starts_with('/') => {
-            PathBuf::from(p).join("tasks")
+        Some(p) if !p.is_empty() && p != "null" => {
+            // Validate the folder path is within workspace
+            let validatedPath = validateFolderPath(&wsPath, p)?;
+            validatedPath.join("tasks")
         }
         _ => tasksDir(&wsPath, ""),
     };

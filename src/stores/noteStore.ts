@@ -84,7 +84,11 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     getNoteContent: async (id: string) => {
         const cached = contentCache.get(id);
         if (cached !== undefined) {
-            set({ selectedNoteContent: cached });
+            // Update both selectedNoteContent AND the note in the notes array
+            set(state => ({
+                selectedNoteContent: cached,
+                notes: state.notes.map(n => n.id === id ? { ...n, content: cached } : n),
+            }));
             return cached;
         }
         const content = await invoke<string>('getNoteContent', { id });

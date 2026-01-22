@@ -1,6 +1,7 @@
 // Floating window commands - complete implementation
 
 use tauri::{Manager, WebviewWindowBuilder, WebviewUrl};
+use urlencoding::encode;
 
 #[cfg(target_os = "macos")]
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
@@ -28,6 +29,24 @@ pub fn createFloatingWindow(app: tauri::AppHandle, config: FloatingWindowConfig)
     println!("  - position: ({}, {})", config.x, config.y);
     println!("  - size: {}x{}", config.width, config.height);
 
+    // Validate item_type - must be "task" or "note"
+    if config.item_type != "task" && config.item_type != "note" {
+        return Err("Invalid item_type: must be 'task' or 'note'".to_string());
+    }
+
+    // Validate note_id - must be alphanumeric with dashes (UUID format)
+    if !config.note_id.chars().all(|c| c.is_alphanumeric() || c == '-') {
+        return Err("Invalid note_id format".to_string());
+    }
+
+    // Validate theme - must be "light", "dark", or "system"
+    if config.theme != "light" && config.theme != "dark" && config.theme != "system" {
+        return Err("Invalid theme: must be 'light', 'dark', or 'system'".to_string());
+    }
+
+    // Validate opacity - must be between 0 and 1
+    let opacity = config.opacity.clamp(0.0, 1.0);
+
     let label = format!("float_{}_{}", config.item_type, config.note_id.replace("-", "_"));
     println!("[createFloatingWindow] Window label: {}", label);
 
@@ -39,9 +58,16 @@ pub fn createFloatingWindow(app: tauri::AppHandle, config: FloatingWindowConfig)
         return Ok(());
     }
 
-    let url = format!("/floating?type={}&id={}&opacity={}&theme={}", config.item_type, config.note_id, config.opacity, config.theme);
+    // URL-encode all parameters to prevent injection
+    let url = format!(
+        "/floating?type={}&id={}&opacity={}&theme={}",
+        encode(&config.item_type),
+        encode(&config.note_id),
+        encode(&opacity.to_string()),
+        encode(&config.theme)
+    );
     println!("[createFloatingWindow] Creating new window with URL: {}", url);
-    println!("[createFloatingWindow] Opacity: {}, Theme: {}", config.opacity, config.theme);
+    println!("[createFloatingWindow] Opacity: {}, Theme: {}", opacity, config.theme);
 
     let window = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
         .title("")
@@ -63,15 +89,15 @@ pub fn createFloatingWindow(app: tauri::AppHandle, config: FloatingWindowConfig)
     // Otherwise, let CSS handle the transparency with backdrop-filter
     #[cfg(target_os = "macos")]
     {
-        if config.opacity >= 0.99 {
+        if opacity >= 0.99 {
             // Use HudWindow for a subtle frosted glass effect with 16px corner radius
             if let Err(e) = apply_vibrancy(&window, NSVisualEffectMaterial::HudWindow, None, Some(16.0)) {
                 println!("[createFloatingWindow] Warning: Could not apply vibrancy: {}", e);
             } else {
-                println!("[createFloatingWindow] Applied vibrancy with rounded corners (opacity = {})", config.opacity);
+                println!("[createFloatingWindow] Applied vibrancy with rounded corners (opacity = {})", opacity);
             }
         } else {
-            println!("[createFloatingWindow] Skipping vibrancy (opacity = {}), using CSS transparency", config.opacity);
+            println!("[createFloatingWindow] Skipping vibrancy (opacity = {}), using CSS transparency", opacity);
         }
     }
 

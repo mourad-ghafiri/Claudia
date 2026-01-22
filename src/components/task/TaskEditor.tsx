@@ -25,6 +25,23 @@ export function TaskEditor({ taskId: propTaskId, embedded = false }: { taskId?: 
     const [folderPath, setFolderPath] = useState<string | null>(null);
     const [tags, setTags] = useState<string[]>([]);
     const [isSaving, setIsSaving] = useState(false);
+    // Track dark mode for Monaco Editor theme
+    const [isDarkMode, setIsDarkMode] = useState(() =>
+        document.documentElement.classList.contains('dark')
+    );
+
+    // Listen for theme changes
+    useEffect(() => {
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.attributeName === 'class') {
+                    setIsDarkMode(document.documentElement.classList.contains('dark'));
+                }
+            });
+        });
+        observer.observe(document.documentElement, { attributes: true });
+        return () => observer.disconnect();
+    }, []);
 
     // Use propTaskId if provided (embedded mode), otherwise use editingTaskId from store
     const taskIdToUse = propTaskId || editingTaskId;
@@ -193,7 +210,7 @@ export function TaskEditor({ taskId: propTaskId, embedded = false }: { taskId?: 
                 <Editor
                     height="100%"
                     defaultLanguage="markdown"
-                    theme="vs-dark"
+                    theme={isDarkMode ? 'vs-dark' : 'light'}
                     value={description}
                     onChange={(value) => setDescription(value || '')}
                     options={{

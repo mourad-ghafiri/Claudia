@@ -105,7 +105,11 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     getTaskContent: async (id: string) => {
         const cached = contentCache.get(id);
         if (cached !== undefined) {
-            set({ selectedTaskContent: cached });
+            // Update both selectedTaskContent AND the task in the tasks array
+            set(state => ({
+                selectedTaskContent: cached,
+                tasks: state.tasks.map(t => t.id === id ? { ...t, description: cached } : t),
+            }));
             return cached;
         }
         const content = await invoke<string>('getTaskContent', { id });

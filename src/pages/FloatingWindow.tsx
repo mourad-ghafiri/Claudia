@@ -78,14 +78,27 @@ export function FloatingWindow() {
   // Track if a save is in progress to prevent overlapping saves
   const isSavingRef = useRef(false);
 
-  // Get itemId, type, opacity, and theme from URL params
+  // Get itemId, type, opacity, and theme from URL params with validation
   const params = new URLSearchParams(window.location.search);
-  const itemId = params.get('id') || params.get('itemId') || params.get('noteId'); // Support multiple param names
-  const urlType = params.get('type') as ItemType | null;
-  const urlOpacity = params.get('opacity');
-  const urlTheme = params.get('theme') as 'light' | 'dark' | 'system' | null;
-  const opacity = urlOpacity ? parseFloat(urlOpacity) : 1;
-  const theme = urlTheme || 'system';
+  const rawItemId = params.get('id') || params.get('itemId') || params.get('noteId');
+  const rawType = params.get('type');
+  const rawOpacity = params.get('opacity');
+  const rawTheme = params.get('theme');
+
+  // Validate itemId - should be alphanumeric with dashes (UUID format)
+  const itemId = rawItemId && /^[a-zA-Z0-9-]+$/.test(rawItemId) ? rawItemId : null;
+
+  // Validate type - must be 'task' or 'note'
+  const validTypes: ItemType[] = ['task', 'note'];
+  const urlType: ItemType | null = validTypes.includes(rawType as ItemType) ? (rawType as ItemType) : null;
+
+  // Validate and bounds-check opacity (0-1)
+  const parsedOpacity = rawOpacity ? parseFloat(rawOpacity) : NaN;
+  const opacity = !isNaN(parsedOpacity) ? Math.max(0, Math.min(1, parsedOpacity)) : 1;
+
+  // Validate theme - must be 'light', 'dark', or 'system'
+  const validThemes = ['light', 'dark', 'system'] as const;
+  const theme = validThemes.includes(rawTheme as any) ? (rawTheme as 'light' | 'dark' | 'system') : 'system';
 
   // Track current theme in state so it can be updated by events
   const [currentTheme, setCurrentTheme] = useState(theme);

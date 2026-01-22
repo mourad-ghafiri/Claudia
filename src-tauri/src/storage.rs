@@ -34,6 +34,70 @@ pub fn foldersDir(workspacePath: &str) -> PathBuf {
     PathBuf::from(workspacePath).join("folders")
 }
 
+/// Validate that a user-provided path is within the workspace directory
+/// Returns the validated canonical path or an error if path traversal is detected
+pub fn validatePathWithinWorkspace(workspacePath: &str, userPath: &str) -> Result<PathBuf, String> {
+    let workspace = PathBuf::from(workspacePath);
+    let workspaceCanonical = workspace.canonicalize()
+        .map_err(|e| format!("Invalid workspace path: {}", e))?;
+
+    // Construct the full path
+    let fullPath = if userPath.starts_with('/') {
+        // If it's an absolute-looking path, it should still be relative to workspace
+        workspace.join(userPath.trim_start_matches('/'))
+    } else {
+        workspace.join(userPath)
+    };
+
+    // Create parent directories if they don't exist (for new files)
+    if let Some(parent) = fullPath.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    // Get canonical path (resolves .., symlinks, etc.)
+    let canonicalPath = fullPath.canonicalize()
+        .unwrap_or_else(|_| fullPath.clone());
+
+    // Check if the canonical path starts with the workspace path
+    if !canonicalPath.starts_with(&workspaceCanonical) {
+        return Err("Path traversal detected: path is outside workspace".to_string());
+    }
+
+    Ok(canonicalPath)
+}
+
+/// Validate a folder path within the workspace's folders directory
+pub fn validateFolderPath(workspacePath: &str, folderPath: &str) -> Result<PathBuf, String> {
+    let foldersBase = foldersDir(workspacePath);
+
+    // Ensure folders directory exists
+    let _ = std::fs::create_dir_all(&foldersBase);
+
+    let foldersCanonical = foldersBase.canonicalize()
+        .map_err(|e| format!("Invalid folders directory: {}", e))?;
+
+    // Construct the full folder path
+    let fullPath = if folderPath.starts_with('/') {
+        foldersBase.join(folderPath.trim_start_matches('/'))
+    } else {
+        foldersBase.join(folderPath)
+    };
+
+    // Create directory if it doesn't exist
+    let _ = std::fs::create_dir_all(&fullPath);
+
+    // Get canonical path
+    let canonicalPath = fullPath.canonicalize()
+        .unwrap_or_else(|_| fullPath.clone());
+
+    // Check if within folders directory
+    if !canonicalPath.starts_with(&foldersCanonical) {
+        return Err("Path traversal detected: folder path is outside workspace".to_string());
+    }
+
+    Ok(canonicalPath)
+}
+
 /// Notes directory inside a specific folder
 /// folderPath is relative path within folders/ (empty string for root)
 pub fn notesDir(workspacePath: &str, folderPath: &str) -> PathBuf {

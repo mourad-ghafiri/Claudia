@@ -21,6 +21,23 @@ export function NoteEditor({ noteId: propNoteId, embedded = false }: { noteId?: 
   const [color, setColor] = useState('#6B9F78');
   const [tags, setTags] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  // Track dark mode for Monaco Editor theme
+  const [isDarkMode, setIsDarkMode] = useState(() =>
+    document.documentElement.classList.contains('dark')
+  );
+
+  // Listen for theme changes
+  useEffect(() => {
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.attributeName === 'class') {
+          setIsDarkMode(document.documentElement.classList.contains('dark'));
+        }
+      });
+    });
+    observer.observe(document.documentElement, { attributes: true });
+    return () => observer.disconnect();
+  }, []);
 
   // Use propNoteId if provided (embedded mode), otherwise use editingNoteId from store
   const noteIdToUse = propNoteId || editingNoteId;
@@ -165,7 +182,7 @@ export function NoteEditor({ noteId: propNoteId, embedded = false }: { noteId?: 
         <Editor
           height="100%"
           defaultLanguage="markdown"
-          theme="vs-dark"
+          theme={isDarkMode ? 'vs-dark' : 'light'}
           value={content}
           onChange={(value) => setContent(value || '')}
           options={{
