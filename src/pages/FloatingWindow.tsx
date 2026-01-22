@@ -5,8 +5,7 @@ import { listen, emit } from '@tauri-apps/api/event';
 import { X, Check, Trash2, Tag, FileText, CheckSquare, AlertTriangle, Clock, MoreHorizontal } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { MarkdownRenderer } from '../components/ui/MarkdownRenderer';
 import type { Task, TaskStatus, Note } from '../types';
 
 type ItemType = 'note' | 'task';
@@ -612,49 +611,11 @@ export function FloatingWindow() {
           {/* Content area */}
           <div className="flex-1 px-4 pb-3 overflow-y-auto overflow-x-hidden floating-content-scroll">
             {displayContent ? (
-              itemType === 'note' ? (
-                <div className="prose prose-sm dark:prose-invert max-w-none text-[13px] leading-relaxed text-[#4A4A4A] dark:text-[#C8C6C3]">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      code: ({ children, className, ...props }: any) => {
-                        const match = /language-(\w+)/.exec(className || '');
-                        return match ? (
-                          <pre className="bg-black/5 dark:bg-white/5 rounded-lg p-3 overflow-x-auto text-xs">
-                            <code className={`${className}`} {...props}>
-                              {children}
-                            </code>
-                          </pre>
-                        ) : (
-                          <code
-                            className="px-1.5 py-0.5 bg-black/5 dark:bg-white/10 rounded text-[11px]"
-                            style={{ color: accentColor }}
-                            {...props}
-                          >
-                            {children}
-                          </code>
-                        );
-                      },
-                      p: ({ children, ...props }: any) => (
-                        <p className="mb-2 last:mb-0" {...props}>{children}</p>
-                      ),
-                      ul: ({ children, ...props }: any) => (
-                        <ul className="mb-2 last:mb-0 pl-4" {...props}>{children}</ul>
-                      ),
-                      li: ({ children, ...props }: any) => (
-                        <li className="mb-1" {...props}>{children}</li>
-                      ),
-                    }}
-                  >
-                    {displayContent}
-                  </ReactMarkdown>
-                </div>
-              ) : (
-                <div
-                  className="prose prose-sm dark:prose-invert max-w-none text-[13px] leading-relaxed text-[#4A4A4A] dark:text-[#C8C6C3]"
-                  dangerouslySetInnerHTML={{ __html: displayContent }}
-                />
-              )
+              <MarkdownRenderer
+                content={displayContent}
+                maxChars={300}
+                className="text-[13px] leading-relaxed text-[#4A4A4A] dark:text-[#C8C6C3]"
+              />
             ) : (
               <p className="text-[13px] text-[#B5AFA6] dark:text-[#6B6B6B] italic">
                 No {itemType === 'task' ? 'description' : 'content'}

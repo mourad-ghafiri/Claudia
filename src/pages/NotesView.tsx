@@ -11,12 +11,10 @@ import { Button } from '../components/ui/Button';
 import { ColorPicker } from '../components/ui/ColorPicker';
 import { TagInput } from '../components/ui/TagInput';
 import { TemplateSelector } from '../components/template/TemplateSelector';
+import { MarkdownRenderer } from '../components/ui/MarkdownRenderer';
 import { createFloatingWindow, closeFloatingWindow } from '../lib/tauri';
 import { listen } from '@tauri-apps/api/event';
 import toast from 'react-hot-toast';
-import mermaid from 'mermaid';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import Editor from '@monaco-editor/react';
 import {
     DndContext,
@@ -36,257 +34,6 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { Note } from '../types';
-
-// Global cache for mermaid renders to avoid re-rendering same diagrams
-const mermaidCache = new Map<string, string>();
-let mermaidIdCounter = 0;
-
-// Mermaid Component - lazy loads only when visible
-const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) {
-    const ref = useRef<HTMLDivElement>(null);
-    const [isVisible, setIsVisible] = useState(false);
-    const [svg, setSvg] = useState<string | null>(() => mermaidCache.get(code) || null);
-    const [hasError, setHasError] = useState(false);
-    const idRef = useRef(`mermaid-${++mermaidIdCounter}`);
-
-    // Intersection Observer - only render when visible
-    useEffect(() => {
-        const observer = new IntersectionObserver(
-            ([entry]) => {
-                if (entry.isIntersecting) {
-                    setIsVisible(true);
-                    observer.disconnect();
-                }
-            },
-            { rootMargin: '100px' }
-        );
-        if (ref.current) {
-            observer.observe(ref.current);
-        }
-        return () => observer.disconnect();
-    }, []);
-
-    // Render mermaid only when visible and not cached
-    useEffect(() => {
-        if (!isVisible || !code || svg) return;
-
-        // Check cache first
-        const cached = mermaidCache.get(code);
-        if (cached) {
-            setSvg(cached);
-            return;
-        }
-
-        // Use requestIdleCallback to not block main thread
-        const timeoutId = setTimeout(() => {
-            mermaid.render(idRef.current, code)
-                .then(({ svg }) => {
-                    mermaidCache.set(code, svg);
-                    setSvg(svg);
-                })
-                .catch(() => {
-                    setHasError(true);
-                });
-        }, 0);
-
-        return () => clearTimeout(timeoutId);
-    }, [isVisible, code, svg]);
-
-    // If there's an error, just show the code as a regular code block
-    if (hasError) {
-        return (
-            <div className="my-4 bg-[#F5F3F0] dark:bg-[#2E2E2E] rounded-xl overflow-hidden border border-[#EBE8E4] dark:border-[#393939]">
-                <pre className="p-4 overflow-x-auto m-0">
-                    <code className="bg-transparent p-0 block text-[#2D2D2D] dark:text-[#E8E6E3] text-sm font-mono">{code}</code>
-                </pre>
-            </div>
-        );
-    }
-
-    // Placeholder while not visible or loading
-    if (!svg) {
-        return (
-            <div ref={ref} className="my-4 bg-[#F5F3F0] dark:bg-[#2E2E2E] rounded-xl border border-[#EBE8E4] dark:border-[#393939] p-4 h-32 flex items-center justify-center">
-                <span className="text-[#6B6B6B] dark:text-[#B5AFA6] text-sm">Loading diagram...</span>
-            </div>
-        );
-    }
-
-    return (
-        <div
-            ref={ref}
-            className="my-4 p-4 rounded-xl bg-[#FDFCFB] dark:bg-[#2E2E2E] border border-[#EBE8E4] dark:border-[#393939] overflow-x-auto mermaid-container"
-            dangerouslySetInnerHTML={{ __html: svg }}
-            style={{
-                // Override mermaid's internal backgrounds
-            }}
-        />
-    );
-});
-
-// Add global styles for mermaid diagrams
-const mermaidStyles = document.createElement('style');
-mermaidStyles.textContent = `
-  .mermaid-container svg {
-    max-width: 100%;
-    height: auto;
-  }
-  .mermaid-container .node rect,
-  .mermaid-container .node circle,
-  .mermaid-container .node ellipse,
-  .mermaid-container .node polygon,
-  .mermaid-container .node path {
-    fill: #F5F3F0 !important;
-    stroke: #D8D3CC !important;
-  }
-  .dark .mermaid-container .node rect,
-  .dark .mermaid-container .node circle,
-  .dark .mermaid-container .node ellipse,
-  .dark .mermaid-container .node polygon,
-  .dark .mermaid-container .node path {
-    fill: #393939 !important;
-    stroke: #4A4A4A !important;
-  }
-  .mermaid-container .node .label,
-  .mermaid-container .nodeLabel,
-  .mermaid-container .label {
-    color: #2D2D2D !important;
-    fill: #2D2D2D !important;
-  }
-  .dark .mermaid-container .node .label,
-  .dark .mermaid-container .nodeLabel,
-  .dark .mermaid-container .label {
-    color: #E8E6E3 !important;
-    fill: #E8E6E3 !important;
-  }
-  .mermaid-container .edgePath .path,
-  .mermaid-container .flowchart-link {
-    stroke: #B5AFA6 !important;
-  }
-  .dark .mermaid-container .edgePath .path,
-  .dark .mermaid-container .flowchart-link {
-    stroke: #6B6B6B !important;
-  }
-  .mermaid-container .marker {
-    fill: #B5AFA6 !important;
-    stroke: #B5AFA6 !important;
-  }
-  .dark .mermaid-container .marker {
-    fill: #6B6B6B !important;
-    stroke: #6B6B6B !important;
-  }
-  .mermaid-container .edgeLabel {
-    background-color: transparent !important;
-  }
-  .mermaid-container text {
-    fill: #2D2D2D !important;
-  }
-  .dark .mermaid-container text {
-    fill: #E8E6E3 !important;
-  }
-`;
-if (!document.getElementById('mermaid-theme-styles')) {
-    mermaidStyles.id = 'mermaid-theme-styles';
-    document.head.appendChild(mermaidStyles);
-}
-
-// Simple code block without mermaid - much faster
-const SimpleCodeBlock = memo(function SimpleCodeBlock({ children, className, ...rest }: any) {
-    const match = /language-(\w+)/.exec(className || '');
-    const language = match ? match[1] : '';
-
-    return match ? (
-        <div className="my-4 rounded-xl overflow-hidden bg-[#F5F3F0] dark:bg-[#2E2E2E] border border-[#EBE8E4] dark:border-[#393939]">
-            {/* Language label */}
-            {language && (
-                <div className="px-4 py-1.5 border-b border-[#EBE8E4] dark:border-[#393939] bg-[#EBE8E4]/50 dark:bg-[#393939]/50">
-                    <span className="text-[10px] font-medium uppercase tracking-wide text-[#6B6B6B] dark:text-[#B5AFA6]">
-                        {language}
-                    </span>
-                </div>
-            )}
-            <pre {...rest} className={`p-4 ${className} overflow-x-auto m-0`}>
-                <code className="bg-transparent p-0 block text-[#2D2D2D] dark:text-[#E8E6E3] text-sm font-mono">{children}</code>
-            </pre>
-        </div>
-    ) : (
-        <code {...rest} className="px-1.5 py-0.5 bg-[#EBE8E4] dark:bg-[#393939] rounded text-[#DA7756] font-mono text-sm">
-            {children}
-        </code>
-    );
-});
-
-// Code block that handles mermaid separately
-const CodeBlock = memo(function CodeBlock({ children, className, ...rest }: any) {
-    const match = /language-(\w+)/.exec(className || '');
-    const language = match ? match[1] : '';
-    const code = String(children).replace(/\n$/, '');
-
-    if (language === 'mermaid') {
-        return <MermaidDiagram code={code} />;
-    }
-
-    return <SimpleCodeBlock className={className} {...rest}>{children}</SimpleCodeBlock>;
-});
-
-// Memoized markdown components object - defined once outside render
-const markdownComponents = {
-    code: CodeBlock,
-};
-
-// Memoized Markdown Preview component with deferred rendering
-const MemoizedMarkdownPreview = memo(function MemoizedMarkdownPreview({ content }: { content: string }) {
-    const [isReady, setIsReady] = useState(false);
-    const [displayContent, setDisplayContent] = useState('');
-
-    useEffect(() => {
-        setIsReady(false);
-        // Defer markdown parsing to next frame to not block UI
-        const timeoutId = requestAnimationFrame(() => {
-            setDisplayContent(content);
-            setIsReady(true);
-        });
-        return () => cancelAnimationFrame(timeoutId);
-    }, [content]);
-
-    if (!isReady) {
-        return (
-            <div className="w-full h-full p-6 flex items-center justify-center">
-                <span className="text-[#6B6B6B] text-sm">Loading...</span>
-            </div>
-        );
-    }
-
-    return (
-        <div className="w-full h-full p-6 overflow-y-auto prose prose-neutral dark:prose-invert max-w-none prose-headings:text-[#2D2D2D] dark:prose-headings:text-[#E8E6E3] prose-p:text-[#4A4A4A] dark:prose-p:text-[#C8C6C3] prose-a:text-[#DA7756] prose-strong:text-[#2D2D2D] dark:prose-strong:text-[#E8E6E3] prose-pre:bg-transparent prose-pre:p-0">
-            <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={markdownComponents}
-            >
-                {displayContent}
-            </ReactMarkdown>
-        </div>
-    );
-});
-
-mermaid.initialize({
-    startOnLoad: false,
-    theme: 'neutral',
-    securityLevel: 'loose',
-    suppressErrorRendering: true,
-    themeVariables: {
-        background: 'transparent',
-        primaryColor: '#DA7756',
-        primaryTextColor: '#2D2D2D',
-        primaryBorderColor: '#D8D3CC',
-        lineColor: '#B5AFA6',
-        secondaryColor: '#F5F3F0',
-        tertiaryColor: '#EBE8E4',
-    },
-});
-
-// Helper to strip HTML tags - defined once outside component
-const stripHtmlTags = (html: string) => html.replace(/<[^>]*>?/gm, '');
 
 // Sortable Note Item - Unified styling with KanbanCard - memoized
 const SortableNoteItem = memo(function SortableNoteItem({
@@ -360,12 +107,6 @@ const SortableNoteItem = memo(function SortableNoteItem({
         opacity: isDragging ? 0.5 : 1,
     };
 
-    // Memoize content preview - show truncated content or placeholder
-    const contentPreview = useMemo(() => {
-        if (!note.content) return '';
-        const stripped = stripHtmlTags(note.content);
-        return stripped.substring(0, 100) || '';
-    }, [note.content]);
 
     // Memoize date formatting - expensive locale operations
     const formattedDate = useMemo(() => {
@@ -407,9 +148,9 @@ const SortableNoteItem = memo(function SortableNoteItem({
             </h3>
 
             {/* Content preview */}
-            {contentPreview && (
+            {note.content && (
                 <div className="mt-1 text-xs text-[#6B6B6B] dark:text-[#B5AFA6] line-clamp-2">
-                    {contentPreview}
+                    <MarkdownRenderer content={note.content} maxChars={200} />
                 </div>
             )}
 
@@ -1009,7 +750,9 @@ export function NotesView() {
                                         }}
                                     />
                                 ) : (
-                                    <MemoizedMarkdownPreview content={selectedNote.content} />
+                                    <div className="w-full h-full p-6 overflow-y-auto">
+                                        <MarkdownRenderer content={selectedNote.content} maxChars={-1} className="prose-headings:text-[#2D2D2D] dark:prose-headings:text-[#E8E6E3] prose-p:text-[#4A4A4A] dark:prose-p:text-[#C8C6C3] prose-a:text-[#DA7756]" />
+                                    </div>
                                 )}
                             </div>
                         </>

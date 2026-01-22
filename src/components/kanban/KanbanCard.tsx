@@ -9,6 +9,7 @@ import { useUIStore } from '../../stores/uiStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { closeFloatingWindow, createFloatingWindow } from '../../lib/tauri';
 import { Button } from '../ui/Button';
+import { MarkdownRenderer } from '../ui/MarkdownRenderer';
 import { useState, useRef, useEffect, useMemo, memo } from 'react';
 
 interface KanbanCardProps {
@@ -160,10 +161,9 @@ export const KanbanCard = memo(function KanbanCard({ task }: KanbanCardProps) {
 
       {/* Description preview */}
       {task.description && (
-        <div
-          className="mt-1 text-xs text-[#6B6B6B] dark:text-[#B5AFA6] line-clamp-2 prose-sm"
-          dangerouslySetInnerHTML={{ __html: task.description }}
-        />
+        <div className="mt-1 text-xs text-[#6B6B6B] dark:text-[#B5AFA6] line-clamp-2">
+          <MarkdownRenderer content={task.description} maxChars={200} />
+        </div>
       )}
 
       {/* Tags and Date/Time */}
