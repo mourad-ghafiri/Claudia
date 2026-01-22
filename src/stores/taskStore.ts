@@ -3,8 +3,22 @@ import { invoke } from '@tauri-apps/api/core';
 import type { TaskInfo, TaskStatus, CreateTaskInput, UpdateTaskInput, Task, FloatWindow } from '../types';
 import { toTask } from '../types';
 
-// Content cache for task descriptions
+// Content cache for task descriptions with LRU eviction to prevent memory leaks
+const MAX_CONTENT_CACHE_SIZE = 100;
 const contentCache = new Map<string, string>();
+
+// Helper to add to cache with LRU eviction
+function setContentCache(id: string, content: string) {
+    // Delete first if exists to move to end (most recently used)
+    contentCache.delete(id);
+
+    // If cache is full, delete the oldest entry (first in map)
+    if (contentCache.size >= MAX_CONTENT_CACHE_SIZE) {
+        const firstKey = contentCache.keys().next().value;
+        if (firstKey) contentCache.delete(firstKey);
+    }
+    contentCache.set(id, content);
+}
 
 interface TaskState {
     tasks: Task[];
@@ -95,7 +109,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
             return cached;
         }
         const content = await invoke<string>('getTaskContent', { id });
-        contentCache.set(id, content);
+        setContentCache(id, content);
         // Update both selectedTaskContent and the task in the tasks array
         set(state => ({
             selectedTaskContent: content,
@@ -107,7 +121,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     createTask: async (input: CreateTaskInput) => {
         const taskInfo = await invoke<TaskInfo>('createTask', { input });
         const description = input.content || '';
-        contentCache.set(taskInfo.id, description);
+        setContentCache(taskInfo.id, description);
         const task = toTask(taskInfo, description);
         set(state => ({ tasks: [...state.tasks, task] }));
         return task;
@@ -145,7 +159,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 
         // Update content cache if content was changed
         if (input.content !== undefined) {
-            contentCache.set(input.id, input.content);
+            setContentCache(input.id, input.content);
         }
 
         set(state => ({

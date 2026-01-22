@@ -3,8 +3,22 @@ import { invoke } from '@tauri-apps/api/core';
 import type { NoteInfo, CreateNoteInput, UpdateNoteInput, Note, FloatWindow } from '../types';
 import { toNote } from '../types';
 
-// Content cache for notes
+// Content cache for notes with LRU eviction to prevent memory leaks
+const MAX_CONTENT_CACHE_SIZE = 100;
 const contentCache = new Map<string, string>();
+
+// Helper to add to cache with LRU eviction
+function setContentCache(id: string, content: string) {
+    // Delete first if exists to move to end (most recently used)
+    contentCache.delete(id);
+
+    // If cache is full, delete the oldest entry (first in map)
+    if (contentCache.size >= MAX_CONTENT_CACHE_SIZE) {
+        const firstKey = contentCache.keys().next().value;
+        if (firstKey) contentCache.delete(firstKey);
+    }
+    contentCache.set(id, content);
+}
 
 interface NoteState {
     notes: Note[];
@@ -74,7 +88,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
             return cached;
         }
         const content = await invoke<string>('getNoteContent', { id });
-        contentCache.set(id, content);
+        setContentCache(id, content);
         // Update both selectedNoteContent and the note in the notes array
         set(state => ({
             selectedNoteContent: content,
@@ -86,7 +100,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     createNote: async (input: CreateNoteInput) => {
         const noteInfo = await invoke<NoteInfo>('createNote', { input });
         const content = input.content || '';
-        contentCache.set(noteInfo.id, content);
+        setContentCache(noteInfo.id, content);
         const note = toNote(noteInfo, content);
         set(state => ({ notes: [...state.notes, note] }));
         return note;
@@ -122,7 +136,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
         // Update content cache if content was changed
         if (input.content !== undefined) {
-            contentCache.set(input.id, input.content);
+            setContentCache(input.id, input.content);
         }
 
         set(state => ({

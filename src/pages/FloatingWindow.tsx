@@ -75,6 +75,8 @@ export function FloatingWindow() {
   const pendingUpdatesRef = useRef<{ window_x?: number; window_y?: number; window_width?: number; window_height?: number }>({});
   // Track current position/size locally to avoid stale values when saving
   const currentPositionRef = useRef<{ x: number; y: number; w: number; h: number }>({ x: 0, y: 0, w: 0, h: 0 });
+  // Track if a save is in progress to prevent overlapping saves
+  const isSavingRef = useRef(false);
 
   // Get itemId, type, opacity, and theme from URL params
   const params = new URLSearchParams(window.location.search);
@@ -175,55 +177,99 @@ export function FloatingWindow() {
     }
   }, [task, note]);
 
-  // Debounced save for position/size changes
+  // Debounced save for position/size changes with race condition protection
   const debouncedSave = useCallback((id: string, type: ItemType, updates: { window_x?: number; window_y?: number; window_width?: number; window_height?: number }) => {
     pendingUpdatesRef.current = { ...pendingUpdatesRef.current, ...updates };
 
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
     }
-    saveTimeoutRef.current = window.setTimeout(async () => {
+
+    const attemptSave = async () => {
+      // Skip if already saving - updates will be picked up by next save
+      if (isSavingRef.current) {
+        // Re-schedule to try again after current save completes
+        saveTimeoutRef.current = window.setTimeout(attemptSave, 100);
+        return;
+      }
+
+      // Check if there are updates to save
+      if (Object.keys(pendingUpdatesRef.current).length === 0) {
+        return;
+      }
+
+      isSavingRef.current = true;
       const updatesToSave = { ...pendingUpdatesRef.current };
       pendingUpdatesRef.current = {};
-      await savePositionSize(id, type, updatesToSave);
-    }, 500);
+
+      try {
+        await savePositionSize(id, type, updatesToSave);
+      } finally {
+        isSavingRef.current = false;
+      }
+    };
+
+    saveTimeoutRef.current = window.setTimeout(attemptSave, 500);
   }, [savePositionSize]);
 
   useEffect(() => {
     windowRef.current = getCurrentWindow();
+    let isMounted = true;
+    let unlistenMove: (() => void) | null = null;
+    let unlistenResize: (() => void) | null = null;
 
     const setupListeners = async () => {
       if (!windowRef.current || !itemId) return;
 
-      const scaleFactor = await windowRef.current.scaleFactor();
-      console.log('[FloatingWindow] Scale factor:', scaleFactor);
+      // Get initial scale factor for logging
+      const initialScaleFactor = await windowRef.current.scaleFactor();
+      console.log('[FloatingWindow] Initial scale factor:', initialScaleFactor);
 
-      const unlistenMove = await windowRef.current.onMoved(async (position) => {
+      // Set up move listener - queries scale factor on each event for multi-monitor support
+      const moveListener = await windowRef.current.onMoved(async (position) => {
+        if (!isMounted || !windowRef.current) return;
+        // Query current scale factor to handle multi-monitor setups
+        const scaleFactor = await windowRef.current.scaleFactor();
         const logicalX = Math.round(position.payload.x / scaleFactor);
         const logicalY = Math.round(position.payload.y / scaleFactor);
         console.log('[FloatingWindow] Window moved - logical:', logicalX, logicalY);
         debouncedSave(itemId, itemType, { window_x: logicalX, window_y: logicalY });
       });
 
-      const unlistenResize = await windowRef.current.onResized(async (size) => {
+      // Set up resize listener - queries scale factor on each event for multi-monitor support
+      const resizeListener = await windowRef.current.onResized(async (size) => {
+        if (!isMounted || !windowRef.current) return;
+        // Query current scale factor to handle multi-monitor setups
+        const scaleFactor = await windowRef.current.scaleFactor();
         const logicalWidth = Math.round(size.payload.width / scaleFactor);
         const logicalHeight = Math.round(size.payload.height / scaleFactor);
         console.log('[FloatingWindow] Window resized - logical:', logicalWidth, logicalHeight);
         debouncedSave(itemId, itemType, { window_width: logicalWidth, window_height: logicalHeight });
       });
 
-      return () => {
-        unlistenMove();
-        unlistenResize();
-      };
+      // Check if still mounted before storing listeners
+      if (isMounted) {
+        unlistenMove = moveListener;
+        unlistenResize = resizeListener;
+      } else {
+        // Component unmounted during setup - clean up immediately
+        moveListener();
+        resizeListener();
+      }
     };
 
-    const cleanup = setupListeners();
+    setupListeners();
+
     return () => {
-      cleanup.then((fn) => fn?.());
+      isMounted = false;
+      // Clean up listeners if they were set up
+      unlistenMove?.();
+      unlistenResize?.();
+      // Clear any pending save timeout
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
+      // Flush any pending updates
       if (itemId && Object.keys(pendingUpdatesRef.current).length > 0) {
         const updatesToSave = { ...pendingUpdatesRef.current };
         pendingUpdatesRef.current = {};

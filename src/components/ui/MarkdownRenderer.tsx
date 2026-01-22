@@ -5,8 +5,23 @@ import mermaid from 'mermaid';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
 // Global cache for mermaid renders to avoid re-rendering same diagrams
+// LRU cache with max size to prevent memory leaks
+const MAX_MERMAID_CACHE_SIZE = 50;
 const mermaidCache = new Map<string, string>();
 let mermaidIdCounter = 0;
+
+// Helper to add to cache with LRU eviction
+function setMermaidCache(key: string, value: string) {
+    // Delete first if exists to move to end (most recently used)
+    mermaidCache.delete(key);
+
+    // If cache is full, delete the oldest entry (first in map)
+    if (mermaidCache.size >= MAX_MERMAID_CACHE_SIZE) {
+        const firstKey = mermaidCache.keys().next().value;
+        if (firstKey) mermaidCache.delete(firstKey);
+    }
+    mermaidCache.set(key, value);
+}
 
 // Initialize mermaid once
 mermaid.initialize({
@@ -133,7 +148,7 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
         const timeoutId = setTimeout(() => {
             mermaid.render(idRef.current, code)
                 .then(({ svg }) => {
-                    mermaidCache.set(code, svg);
+                    setMermaidCache(code, svg);
                     setSvg(svg);
                 })
                 .catch(() => {

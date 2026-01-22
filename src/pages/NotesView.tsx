@@ -251,45 +251,69 @@ export function NotesView() {
     const [showTemplateSelector, setShowTemplateSelector] = useState(false);
 
     // Sync local visible states with notes
+    // Uses functional update to avoid stale closure issues with localVisibleStates
     useEffect(() => {
-        const newStates: Record<string, boolean> = {};
-        notes.forEach(note => {
-            newStates[note.id] = localVisibleStates[note.id] ?? note.isVisible;
+        setLocalVisibleStates(prevStates => {
+            const newStates: Record<string, boolean> = {};
+            notes.forEach(note => {
+                newStates[note.id] = prevStates[note.id] ?? note.isVisible;
+            });
+            return newStates;
         });
-        setLocalVisibleStates(newStates);
     }, [notes]);
 
     // Listen for note-hidden and note-position-changed events from floating windows
     useEffect(() => {
-        const unlistenHidden = listen<{ noteId: string }>('note-hidden', async (event) => {
-            const { noteId } = event.payload;
-            // Update local state
-            setLocalVisibleStates(prev => ({ ...prev, [noteId]: false }));
-            // Update store
-            await updateNote({ id: noteId, isVisible: false });
-        });
+        let isMounted = true;
+        let unlistenHidden: (() => void) | null = null;
+        let unlistenPosition: (() => void) | null = null;
 
-        const unlistenPosition = listen<{ noteId: string; position_x?: number; position_y?: number; width?: number; height?: number }>(
-            'note-position-changed',
-            (event) => {
-                const { noteId, position_x, position_y, width, height } = event.payload;
-                // Get current note to fill in missing values
-                const currentNote = getNoteById(noteId);
-                if (currentNote) {
-                    updateNotePositionLocal(
-                        noteId,
-                        position_x ?? currentNote.windowX,
-                        position_y ?? currentNote.windowY,
-                        width ?? currentNote.windowWidth,
-                        height ?? currentNote.windowHeight
-                    );
+        const setupListeners = async () => {
+            const hiddenListener = await listen<{ noteId: string }>('note-hidden', async (event) => {
+                if (!isMounted) return;
+                const { noteId } = event.payload;
+                // Update local state
+                setLocalVisibleStates(prev => ({ ...prev, [noteId]: false }));
+                // Update store
+                await updateNote({ id: noteId, isVisible: false });
+            });
+
+            const positionListener = await listen<{ noteId: string; position_x?: number; position_y?: number; width?: number; height?: number }>(
+                'note-position-changed',
+                (event) => {
+                    if (!isMounted) return;
+                    const { noteId, position_x, position_y, width, height } = event.payload;
+                    // Get current note to fill in missing values
+                    const currentNote = getNoteById(noteId);
+                    if (currentNote) {
+                        updateNotePositionLocal(
+                            noteId,
+                            position_x ?? currentNote.windowX,
+                            position_y ?? currentNote.windowY,
+                            width ?? currentNote.windowWidth,
+                            height ?? currentNote.windowHeight
+                        );
+                    }
                 }
+            );
+
+            // Check if still mounted before storing listeners
+            if (isMounted) {
+                unlistenHidden = hiddenListener;
+                unlistenPosition = positionListener;
+            } else {
+                // Component unmounted during setup - clean up immediately
+                hiddenListener();
+                positionListener();
             }
-        );
+        };
+
+        setupListeners();
 
         return () => {
-            unlistenHidden.then(unlisten => unlisten());
-            unlistenPosition.then(unlisten => unlisten());
+            isMounted = false;
+            unlistenHidden?.();
+            unlistenPosition?.();
         };
     }, [updateNote, updateNotePositionLocal, getNoteById]);
 
