@@ -54,14 +54,22 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
   initializeDefaultTemplates: async () => {
     if (get().initialized) return;
 
+    set({ loading: true, error: null });
     try {
       await invoke('initializeDefaultTemplates');
-      set({ initialized: true });
+      set({ initialized: true, loading: false });
       // Fetch both types after initialization
       await get().fetchTemplates('notes');
       await get().fetchTemplates('tasks');
     } catch (error) {
       console.error('Failed to initialize default templates:', error);
+      // Set initialized to true to prevent infinite retry loops
+      // Set error so UI can display it if needed
+      set({
+        initialized: true,
+        loading: false,
+        error: 'Failed to initialize templates. Some features may not work correctly.',
+      });
     }
   },
 

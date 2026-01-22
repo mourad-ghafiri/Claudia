@@ -8,7 +8,15 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 // LRU cache with max size to prevent memory leaks
 const MAX_MERMAID_CACHE_SIZE = 50;
 const mermaidCache = new Map<string, string>();
+
+// Mermaid ID counter with modulo to prevent unbounded growth
+const MAX_MERMAID_ID_COUNTER = 1000000;
 let mermaidIdCounter = 0;
+
+function getNextMermaidId(): string {
+    mermaidIdCounter = (mermaidIdCounter + 1) % MAX_MERMAID_ID_COUNTER;
+    return `mermaid-${Date.now()}-${mermaidIdCounter}`;
+}
 
 // Helper to add to cache with LRU eviction
 function setMermaidCache(key: string, value: string) {
@@ -112,7 +120,7 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
     const [isVisible, setIsVisible] = useState(false);
     const [svg, setSvg] = useState<string | null>(() => mermaidCache.get(code) || null);
     const [hasError, setHasError] = useState(false);
-    const idRef = useRef(`mermaid-${++mermaidIdCounter}`);
+    const idRef = useRef(getNextMermaidId());
 
     // Intersection Observer - only render when visible
     useEffect(() => {
@@ -144,19 +152,37 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
             return;
         }
 
-        // Use requestIdleCallback to not block main thread
-        const timeoutId = setTimeout(() => {
-            mermaid.render(idRef.current, code)
-                .then(({ svg }) => {
+        // Render with timeout to prevent hanging on complex/invalid diagrams
+        const RENDER_TIMEOUT = 5000; // 5 seconds
+        let isMounted = true;
+
+        const renderWithTimeout = async () => {
+            const renderPromise = mermaid.render(idRef.current, code);
+            const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Mermaid render timeout')), RENDER_TIMEOUT)
+            );
+
+            try {
+                const { svg } = await Promise.race([renderPromise, timeoutPromise]);
+                if (isMounted) {
                     setMermaidCache(code, svg);
                     setSvg(svg);
-                })
-                .catch(() => {
+                }
+            } catch (error) {
+                if (isMounted) {
+                    console.warn('[MermaidDiagram] Render failed or timed out:', error);
                     setHasError(true);
-                });
-        }, 0);
+                }
+            }
+        };
 
-        return () => clearTimeout(timeoutId);
+        // Use setTimeout to not block main thread
+        const timeoutId = setTimeout(renderWithTimeout, 0);
+
+        return () => {
+            isMounted = false;
+            clearTimeout(timeoutId);
+        };
     }, [isVisible, code, svg]);
 
     if (hasError) {

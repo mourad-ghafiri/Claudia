@@ -87,23 +87,26 @@ export function FloatingWindow() {
   const opacity = urlOpacity ? parseFloat(urlOpacity) : 1;
   const theme = urlTheme || 'system';
 
-  // Apply theme based on settings
+  // Track current theme in state so it can be updated by events
+  const [currentTheme, setCurrentTheme] = useState(theme);
+
+  // Apply theme based on current theme state
   useEffect(() => {
     const applyTheme = (isDark: boolean) => {
       document.documentElement.classList.toggle('dark', isDark);
     };
 
-    if (theme === 'dark') {
+    if (currentTheme === 'dark') {
       applyTheme(true);
       return;
     }
 
-    if (theme === 'light') {
+    if (currentTheme === 'light') {
       applyTheme(false);
       return;
     }
 
-    // theme === 'system': use system preference
+    // currentTheme === 'system': use system preference
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     applyTheme(prefersDark);
 
@@ -114,7 +117,34 @@ export function FloatingWindow() {
 
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
-  }, [theme]);
+  }, [currentTheme]);
+
+  // Listen for theme changes from main window
+  useEffect(() => {
+    let isMounted = true;
+    let unlistenTheme: (() => void) | null = null;
+
+    const setupListener = async () => {
+      const themeListener = await listen<{ theme: 'light' | 'dark' | 'system' }>('theme-changed', (event) => {
+        if (!isMounted) return;
+        console.log('[FloatingWindow] Theme changed:', event.payload.theme);
+        setCurrentTheme(event.payload.theme);
+      });
+
+      if (isMounted) {
+        unlistenTheme = themeListener;
+      } else {
+        themeListener();
+      }
+    };
+
+    setupListener();
+
+    return () => {
+      isMounted = false;
+      unlistenTheme?.();
+    };
+  }, []);
 
   // Set item type from URL
   useEffect(() => {

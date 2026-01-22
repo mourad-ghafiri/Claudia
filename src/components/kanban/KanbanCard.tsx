@@ -25,6 +25,8 @@ export const KanbanCard = memo(function KanbanCard({ task }: KanbanCardProps) {
   const { openTaskEditor, openDeleteConfirm } = useUIStore();
   const { settings } = useSettingsStore();
   const [showActions, setShowActions] = useState(false);
+  // Track if currently toggling to prevent race conditions with store sync
+  const [isToggling, setIsToggling] = useState(false);
   const isTogglingRef = useRef(false);
 
   // Tags are now string arrays
@@ -34,9 +36,12 @@ export const KanbanCard = memo(function KanbanCard({ task }: KanbanCardProps) {
   const showVisibilityToggle = true;
 
   // Sync local state with task prop when it changes
+  // Skip sync if currently toggling to prevent overwriting optimistic update
   useEffect(() => {
-    setLocalIsVisible(task.isVisible);
-  }, [task.id, task.isVisible]);
+    if (!isToggling) {
+      setLocalIsVisible(task.isVisible);
+    }
+  }, [task.id, task.isVisible, isToggling]);
 
   const {
     attributes,
@@ -73,12 +78,13 @@ export const KanbanCard = memo(function KanbanCard({ task }: KanbanCardProps) {
     // Prevent double execution
     if (isTogglingRef.current) return;
     isTogglingRef.current = true;
+    setIsToggling(true);
 
     // Use local state for accurate toggle
     const currentIsVisible = localIsVisible;
     const newVisibleValue = !currentIsVisible;
 
-    // Update local state IMMEDIATELY for responsive UI
+    // Update local state IMMEDIATELY for responsive UI (optimistic update)
     setLocalIsVisible(newVisibleValue);
 
     try {
@@ -106,7 +112,7 @@ export const KanbanCard = memo(function KanbanCard({ task }: KanbanCardProps) {
           });
         } catch (error) {
           console.error('[KanbanCard] Failed to create floating window:', error);
-          setLocalIsVisible(currentIsVisible);
+          setLocalIsVisible(currentIsVisible); // Rollback on error
           return;
         }
       }
@@ -115,10 +121,11 @@ export const KanbanCard = memo(function KanbanCard({ task }: KanbanCardProps) {
       await updateTask({ id: task.id, float: { x: task.windowX, y: task.windowY, w: task.windowWidth, h: task.windowHeight, show: newVisibleValue } });
     } catch (error) {
       console.error('[KanbanCard] toggleVisibility failed:', error);
-      setLocalIsVisible(currentIsVisible);
+      setLocalIsVisible(currentIsVisible); // Rollback on error
     } finally {
       setTimeout(() => {
         isTogglingRef.current = false;
+        setIsToggling(false);
       }, 300);
     }
   };

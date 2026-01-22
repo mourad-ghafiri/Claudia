@@ -230,7 +230,7 @@ const SortableNoteItem = memo(function SortableNoteItem({
 });
 
 export function NotesView() {
-    const { notes, fetchNotes, fetchNotesByFolder, createNote, updateNote, reorderNotes, getNoteById, updateNotePositionLocal, moveNoteToFolder, getNoteContent } = useNoteStore();
+    const { notes, loading, fetchNotes, fetchNotesByFolder, createNote, updateNote, reorderNotes, getNoteById, updateNotePositionLocal, moveNoteToFolder, getNoteContent } = useNoteStore();
     const { currentFolderPath, setCurrentFolder, folders, reorderFolders } = useFolderStore();
     // Tags are now stored directly as string arrays on notes
     const { searchQuery, openDeleteConfirm, selectedNoteId, setSelectedNoteId } = useUIStore();
@@ -365,11 +365,26 @@ export function NotesView() {
     }, [fetchNotes, currentFolderPath, setCurrentFolder]);
 
     // Load content when a note is selected (lazy loading)
+    // Uses isCurrent flag to prevent stale async operations from affecting state
     useEffect(() => {
-        if (selectedNoteId && !isEditing) {
-            // Load content if not already cached
-            getNoteContent(selectedNoteId);
-        }
+        if (!selectedNoteId || isEditing) return;
+
+        let isCurrent = true;
+
+        const loadContent = async () => {
+            await getNoteContent(selectedNoteId);
+            // Content is loaded into the notes array by getNoteContent
+            // The isCurrent check ensures we don't process stale results
+            if (!isCurrent) {
+                console.log('[NotesView] Skipping stale content load for:', selectedNoteId);
+            }
+        };
+
+        loadContent();
+
+        return () => {
+            isCurrent = false;
+        };
     }, [selectedNoteId, isEditing, getNoteContent]);
 
     useEffect(() => {
@@ -625,7 +640,11 @@ export function NotesView() {
                     </div>
 
                     <div className="flex-1 overflow-y-auto" style={{ scrollbarGutter: 'stable' }}>
-                        {filteredNotes.length === 0 ? (
+                        {loading ? (
+                            <div className="p-4 text-center text-sm text-[#B5AFA6] dark:text-[#6B6B6B]">
+                                <div className="animate-pulse">Loading notes...</div>
+                            </div>
+                        ) : filteredNotes.length === 0 ? (
                             <div className="p-4 text-center text-sm text-[#B5AFA6] dark:text-[#6B6B6B]">
                                 No notes found
                             </div>

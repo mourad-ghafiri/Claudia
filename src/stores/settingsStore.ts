@@ -130,18 +130,23 @@ export const useSettingsStore = create<SettingsState>((set) => ({
             floatingOpacity: partialSettings.floatingOpacity,
         };
 
-        await invoke('updateGlobalSettings', { input });
-
-        set(state => ({
-            settings: {
-                ...state.settings,
-                ...partialSettings,
-            },
-            globalSettings: state.globalSettings ? {
-                ...state.globalSettings,
-                ...partialSettings,
-            } : null,
-        }));
+        try {
+            await invoke('updateGlobalSettings', { input });
+            // Only update local state after successful backend save
+            set(state => ({
+                settings: {
+                    ...state.settings,
+                    ...partialSettings,
+                },
+                globalSettings: state.globalSettings ? {
+                    ...state.globalSettings,
+                    ...partialSettings,
+                } : null,
+            }));
+        } catch (error) {
+            console.error('[SettingsStore] Failed to update global settings:', error);
+            throw error;
+        }
     },
 
     updateWorkspaceSettings: async (partialSettings: Partial<SettingsOverride>) => {
@@ -155,13 +160,18 @@ export const useSettingsStore = create<SettingsState>((set) => ({
             floatingOpacity: partialSettings.floatingOpacity,
         };
 
-        await invoke('updateWorkspaceSettings', { input });
-
-        set(state => ({
-            settings: {
-                ...state.settings,
-                ...partialSettings,
-            },
-        }));
+        try {
+            await invoke('updateWorkspaceSettings', { input });
+            // Only update local state after successful backend save
+            set(state => ({
+                settings: {
+                    ...state.settings,
+                    ...partialSettings,
+                },
+            }));
+        } catch (error) {
+            console.error('[SettingsStore] Failed to update workspace settings:', error);
+            throw error;
+        }
     },
 }));
