@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useMemo, memo, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Trash2, Pin, Edit2, ChevronRight, Eye, EyeOff, FileText, Palette, Folder as FolderIcon } from 'lucide-react';
+import { Plus, Trash2, Pin, Edit2, ChevronRight, Eye, EyeOff, FileText, Palette, Folder as FolderIcon, GripVertical } from 'lucide-react';
 import { useNoteStore } from '../stores/noteStore';
 import { useFolderStore } from '../stores/folderStore';
 import type { FolderInfo, TemplateInfo } from '../types';
@@ -122,8 +122,8 @@ const SortableNoteItem = memo(function SortableNoteItem({
             onMouseLeave={() => setShowActions(false)}
             onClick={onClick}
             className={`
-                relative rounded-xl shadow-sm
-                border-l-4 p-3 cursor-grab active:cursor-grabbing mb-2 mx-2
+                group relative rounded-xl shadow-sm
+                border-l-4 py-3 pr-3 pl-7 mb-2 mx-2 cursor-pointer select-text
                 hover:shadow-md transition-shadow duration-150
                 ${isDragging ? 'shadow-lg ring-2 ring-[#DA7756]' : ''}
                 ${isSelected
@@ -131,9 +131,17 @@ const SortableNoteItem = memo(function SortableNoteItem({
                     : 'bg-white dark:bg-[#2E2E2E]'
                 }
             `}
-            {...attributes}
-            {...listeners}
         >
+            {/* Drag handle */}
+            <div
+                {...attributes}
+                {...listeners}
+                className="absolute left-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing p-1 hover:bg-[#EBE8E4] dark:hover:bg-[#393939] rounded transition-opacity z-10"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <GripVertical className="w-3.5 h-3.5 text-[#B5AFA6] dark:text-[#6B6B6B]" />
+            </div>
+
             {/* Type indicator + Pinned */}
             <div className="absolute top-2 right-2 flex items-center gap-1">
                 <FileText className="w-3 h-3 text-[#6B9F78] opacity-50" />

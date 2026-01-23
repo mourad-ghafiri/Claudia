@@ -13,6 +13,7 @@ interface KanbanColumnProps {
   title: string;
   tasks: Task[];
   color: string;
+  isOver?: boolean;
 }
 
 const columnColors: Record<TaskStatus, string> = {
@@ -36,8 +37,12 @@ const dotColors: Record<TaskStatus, string> = {
   archived: 'bg-[#B5AFA6]',
 };
 
-export const KanbanColumn = memo(function KanbanColumn({ id, title, tasks }: KanbanColumnProps) {
-  const { setNodeRef, isOver } = useDroppable({ id });
+export const KanbanColumn = memo(function KanbanColumn({ id, title, tasks, isOver: isOverProp }: KanbanColumnProps) {
+  // Use droppable for the column itself (for empty columns or dropping at the end)
+  const { setNodeRef, isOver: isOverDroppable } = useDroppable({ id });
+
+  // Combine parent's isOver with our own isOver for visual feedback
+  const showDropIndicator = isOverProp || isOverDroppable;
 
   // Memoize task IDs array to prevent SortableContext re-renders
   const taskIds = useMemo(() => tasks.map((t) => t.id), [tasks]);
@@ -45,9 +50,9 @@ export const KanbanColumn = memo(function KanbanColumn({ id, title, tasks }: Kan
   return (
     <div
       className={`
-        flex flex-col flex-1 min-w-[300px] rounded-2xl border
+        flex flex-col flex-1 min-w-[300px] rounded-2xl border-2
         ${columnColors[id]}
-        ${isOver ? 'ring-2 ring-[#DA7756] ring-opacity-50 border-[#DA7756]' : 'border-transparent'}
+        ${showDropIndicator ? 'ring-2 ring-[#DA7756] ring-opacity-50 border-[#DA7756]' : 'border-transparent'}
         transition-all duration-150
       `}
     >

@@ -1,14 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   DndContext,
   DragOverlay,
-  closestCorners,
+  closestCenter,
   PointerSensor,
   useSensor,
   useSensors,
   DragStartEvent,
   DragEndEvent,
+  DragOverEvent,
+  MeasuringStrategy,
 } from '@dnd-kit/core';
+import { arrayMove } from '@dnd-kit/sortable';
 import { Folder as FolderIcon, ChevronRight, Plus, Trash2, Pin, Edit2, X, Check } from 'lucide-react';
 import { useTaskStore } from '../../stores/taskStore';
 import { useFolderStore } from '../../stores/folderStore';
@@ -23,8 +26,10 @@ const columns: { id: TaskStatus; title: string; color: string }[] = [
   { id: 'done', title: 'Done', color: 'green' },
 ];
 
+const columnIds: TaskStatus[] = ['todo', 'doing', 'done', 'archived'];
+
 export function KanbanBoard() {
-  const { tasks, fetchTasks, fetchTasksByFolder, updateTask, getTasksByStatus } = useTaskStore();
+  const { tasks, fetchTasks, fetchTasksByFolder, updateTask, reorderTasks } = useTaskStore();
   const {
     folders,
     currentFolderPath,
@@ -38,11 +43,20 @@ export function KanbanBoard() {
   } = useFolderStore();
 
   const [activeTask, setActiveTask] = useState<Task | null>(null);
+  const [activeColumn, setActiveColumn] = useState<TaskStatus | null>(null);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [editingFolderPath, setEditingFolderPath] = useState<string | null>(null);
   const [editingFolderName, setEditingFolderName] = useState('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+
+  // Track task order per column for optimistic UI updates during drag
+  const [tasksByColumn, setTasksByColumn] = useState<Record<TaskStatus, Task[]>>({
+    todo: [],
+    doing: [],
+    done: [],
+    archived: [],
+  });
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -64,45 +78,170 @@ export function KanbanBoard() {
     }
   }, [currentFolderPath, fetchTasks, fetchTasksByFolder]);
 
+  // Update local task state when store tasks change
+  useEffect(() => {
+    const filteredTasks = tasks.filter(t => currentFolderPath === null || t.folderPath === currentFolderPath);
+    setTasksByColumn({
+      todo: filteredTasks.filter(t => t.status === 'todo').sort((a, b) => a.rank - b.rank),
+      doing: filteredTasks.filter(t => t.status === 'doing').sort((a, b) => a.rank - b.rank),
+      done: filteredTasks.filter(t => t.status === 'done').sort((a, b) => a.rank - b.rank),
+      archived: filteredTasks.filter(t => t.status === 'archived').sort((a, b) => a.rank - b.rank),
+    });
+  }, [tasks, currentFolderPath]);
+
+  // Find which column a task is in
+  const findColumn = (taskId: string): TaskStatus | null => {
+    for (const status of columnIds) {
+      if (tasksByColumn[status].some(t => t.id === taskId)) {
+        return status;
+      }
+    }
+    return null;
+  };
+
   const handleDragStart = (event: DragStartEvent) => {
-    const task = tasks.find((t) => t.id === event.active.id);
+    const { active } = event;
+    const taskId = active.id as string;
+
+    const task = tasks.find((t) => t.id === taskId);
     if (task) {
       setActiveTask(task);
+      setActiveColumn(task.status);
     }
   };
 
-  const handleDragEnd = async (event: DragEndEvent) => {
+  const handleDragOver = (event: DragOverEvent) => {
     const { active, over } = event;
-    setActiveTask(null);
-
-    if (!over) return;
+    if (!over || !activeTask) return;
 
     const activeId = active.id as string;
     const overId = over.id as string;
 
-    const activeTask = tasks.find((t) => t.id === activeId);
-    if (!activeTask) return;
+    // Check if over is a column
+    const overColumn = columnIds.includes(overId as TaskStatus) ? (overId as TaskStatus) : null;
+    // Check if over is a task
+    const overTask = tasks.find(t => t.id === overId);
 
-    // Check if dropped on a column
-    const targetColumn = columns.find((c) => c.id === overId);
-    if (targetColumn) {
-      if (activeTask.status !== targetColumn.id) {
-        await updateTask({
-          id: activeId,
-          status: targetColumn.id,
-        });
-      }
-      return;
-    }
+    // Determine target column
+    const targetColumn = overColumn || (overTask ? overTask.status : null);
+    if (!targetColumn) return;
 
-    // Check if dropped on another card
-    const overTask = tasks.find((t) => t.id === overId);
-    if (overTask && activeTask.status !== overTask.status) {
-      await updateTask({
-        id: activeId,
-        status: overTask.status,
+    const sourceColumn = findColumn(activeId);
+    if (!sourceColumn) return;
+
+    // If moving to a different column
+    if (sourceColumn !== targetColumn) {
+      setTasksByColumn(prev => {
+        const sourceItems = [...prev[sourceColumn]];
+        const destItems = [...prev[targetColumn]];
+
+        const activeIndex = sourceItems.findIndex(t => t.id === activeId);
+        if (activeIndex === -1) return prev;
+
+        const [movedTask] = sourceItems.splice(activeIndex, 1);
+        const updatedTask = { ...movedTask, status: targetColumn };
+
+        // If dropping on another task, insert at that position
+        if (overTask && overTask.status === targetColumn) {
+          const overIndex = destItems.findIndex(t => t.id === overId);
+          destItems.splice(overIndex, 0, updatedTask);
+        } else {
+          // Dropping on column (empty area), add to end
+          destItems.push(updatedTask);
+        }
+
+        return {
+          ...prev,
+          [sourceColumn]: sourceItems,
+          [targetColumn]: destItems,
+        };
+      });
+      setActiveColumn(targetColumn);
+    } else {
+      // Same column - reorder
+      setTasksByColumn(prev => {
+        const columnItems = [...prev[sourceColumn]];
+        const activeIndex = columnItems.findIndex(t => t.id === activeId);
+        const overIndex = overTask
+          ? columnItems.findIndex(t => t.id === overId)
+          : columnItems.length - 1;
+
+        if (activeIndex === -1 || overIndex === -1 || activeIndex === overIndex) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          [sourceColumn]: arrayMove(columnItems, activeIndex, overIndex),
+        };
       });
     }
+  };
+
+  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    const draggedTask = activeTask;
+    const originalColumn = activeTask?.status;
+
+    setActiveTask(null);
+    setActiveColumn(null);
+
+    if (!over || !draggedTask || !originalColumn) return;
+
+    const activeId = active.id as string;
+    const overId = over.id as string;
+
+    // Determine final column
+    const overColumn = columnIds.includes(overId as TaskStatus) ? (overId as TaskStatus) : null;
+    const overTask = tasks.find(t => t.id === overId);
+    const finalColumn = findColumn(activeId) || overColumn || (overTask ? overTask.status : null);
+
+    if (!finalColumn) return;
+
+    // Get the final order from our local state
+    const finalOrder = tasksByColumn[finalColumn];
+    const taskIds = finalOrder.map(t => t.id);
+
+    // Check if status changed
+    const statusChanged = originalColumn !== finalColumn;
+
+    try {
+      if (statusChanged) {
+        // Update status first
+        await updateTask({
+          id: activeId,
+          status: finalColumn,
+        });
+      }
+
+      // Always reorder to persist the new position
+      if (taskIds.length > 0) {
+        await reorderTasks(currentFolderPath || '', finalColumn, taskIds);
+      }
+    } catch (error) {
+      console.error('Failed to update task:', error);
+      toast.error('Failed to update task');
+      // Refresh to restore correct state
+      if (currentFolderPath) {
+        fetchTasksByFolder(currentFolderPath);
+      } else {
+        fetchTasks();
+      }
+    }
+  }, [activeTask, tasks, tasksByColumn, currentFolderPath, updateTask, reorderTasks, fetchTasks, fetchTasksByFolder]);
+
+  const handleDragCancel = () => {
+    setActiveTask(null);
+    setActiveColumn(null);
+    // Reset local state from store
+    const filteredTasks = tasks.filter(t => currentFolderPath === null || t.folderPath === currentFolderPath);
+    setTasksByColumn({
+      todo: filteredTasks.filter(t => t.status === 'todo').sort((a, b) => a.rank - b.rank),
+      doing: filteredTasks.filter(t => t.status === 'doing').sort((a, b) => a.rank - b.rank),
+      done: filteredTasks.filter(t => t.status === 'done').sort((a, b) => a.rank - b.rank),
+      archived: filteredTasks.filter(t => t.status === 'archived').sort((a, b) => a.rank - b.rank),
+    });
   };
 
   const handleFolderClick = (folderPath: string | null) => {
@@ -177,11 +316,6 @@ export function KanbanBoard() {
   });
 
   const breadcrumbs = getBreadcrumbs(currentFolderPath);
-
-  // Filter tasks for current folder
-  const getFilteredTasksByStatus = (status: TaskStatus) => {
-    return getTasksByStatus(status).filter(t => currentFolderPath === null || t.folderPath === currentFolderPath);
-  };
 
   return (
     <div className="h-full flex">
@@ -358,9 +492,16 @@ export function KanbanBoard() {
       {/* Kanban Columns */}
       <DndContext
         sensors={sensors}
-        collisionDetection={closestCorners}
+        collisionDetection={closestCenter}
         onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
+        measuring={{
+          droppable: {
+            strategy: MeasuringStrategy.Always,
+          },
+        }}
       >
         <div className="flex-1 h-full p-6 overflow-x-auto">
           <div className="flex gap-6 h-full">
@@ -369,8 +510,9 @@ export function KanbanBoard() {
                 key={column.id}
                 id={column.id}
                 title={column.title}
-                tasks={getFilteredTasksByStatus(column.id)}
+                tasks={tasksByColumn[column.id]}
                 color={column.color}
+                isOver={activeColumn !== column.id && activeTask !== null && activeColumn !== null}
               />
             ))}
           </div>

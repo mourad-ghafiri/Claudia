@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback, memo, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Lock, Eye, EyeOff, Copy, Pin, Trash2, Edit2, Key, Folder as FolderIcon, Globe, User, FileText, ExternalLink } from 'lucide-react';
+import { Plus, Lock, Eye, EyeOff, Copy, Pin, Trash2, Edit2, Key, Folder as FolderIcon, Globe, User, FileText, ExternalLink, GripVertical } from 'lucide-react';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
 import { usePasswordStore } from '../stores/passwordStore';
 import { useFolderStore } from '../stores/folderStore';
@@ -543,14 +543,22 @@ const SortablePasswordCard = memo(function SortablePasswordCard({
             onMouseEnter={() => setShowActions(true)}
             onMouseLeave={() => setShowActions(false)}
             className={`
-                relative bg-white dark:bg-[#2E2E2E] rounded-xl shadow-sm
-                border-l-4 p-4 cursor-grab active:cursor-grabbing mb-3 mx-2
+                group relative bg-white dark:bg-[#2E2E2E] rounded-xl shadow-sm
+                border-l-4 py-4 pr-4 pl-8 cursor-pointer select-text mb-3 mx-2
                 hover:shadow-md transition-all duration-150
                 ${isDragging ? 'shadow-lg ring-2 ring-[#DA7756]' : ''}
             `}
-            {...attributes}
-            {...listeners}
         >
+            {/* Drag handle */}
+            <div
+                {...attributes}
+                {...listeners}
+                className="absolute left-1.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing p-1 hover:bg-[#EBE8E4] dark:hover:bg-[#393939] rounded transition-opacity z-10"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <GripVertical className="w-4 h-4 text-[#B5AFA6] dark:text-[#6B6B6B]" />
+            </div>
+
             {/* Header: Title + Pinned */}
             <div className="flex items-center gap-3 mb-3">
                 <Key className="w-5 h-5 text-[#DA7756] flex-shrink-0" />

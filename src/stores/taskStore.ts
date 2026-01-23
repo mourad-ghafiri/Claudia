@@ -44,6 +44,7 @@ interface TaskState {
     getVisibleDoingTasks: () => Task[];
     updateTaskPositionLocal: (taskId: string, x: number, y: number, width: number, height: number) => void;
     moveTaskToFolder: (id: string, targetFolderPath: string) => Promise<void>;
+    reorderTasks: (folderPath: string, status: TaskStatus, taskIds: string[]) => Promise<void>;
 }
 
 export const useTaskStore = create<TaskState>((set, get) => ({
@@ -242,5 +243,26 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         await invoke('moveTaskToFolder', { id, targetFolderPath });
         // Refetch all tasks to ensure consistency (path, rank, etc. all change on backend)
         await get().fetchTasks();
+    },
+
+    reorderTasks: async (folderPath: string, status: TaskStatus, taskIds: string[]) => {
+        // Update ranks locally first for immediate UI feedback
+        set(state => ({
+            tasks: state.tasks.map(t => {
+                const newRank = taskIds.indexOf(t.id);
+                if (newRank !== -1 && t.status === status) {
+                    return { ...t, rank: newRank + 1 };
+                }
+                return t;
+            }),
+        }));
+        // Persist to backend
+        try {
+            await invoke('reorderTasks', { input: { folderPath, status, taskIds } });
+        } catch (error) {
+            console.error('Failed to reorder tasks:', error);
+            // Refetch to sync state
+            await get().fetchTasks();
+        }
     },
 }));

@@ -416,3 +416,54 @@ pub fn moveTaskToFolder(storage: State<'_, StorageState>, id: String, targetFold
     println!("[moveTaskToFolder] SUCCESS");
     Ok(TaskInfo::from(&movedTask))
 }
+
+#[derive(serde::Deserialize)]
+pub struct ReorderTasksInput {
+    pub folderPath: String,
+    pub status: String,
+    pub taskIds: Vec<String>,
+}
+
+#[tauri::command]
+pub fn reorderTasks(storage: State<'_, StorageState>, input: ReorderTasksInput) -> Result<(), String> {
+    println!("[reorderTasks] Called with folderPath: {}, status: {}", input.folderPath, input.status);
+    println!("[reorderTasks] Task IDs to reorder: {:?}", input.taskIds);
+
+    let wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
+
+    // Parse the status
+    let status = TaskStatus::fromFolder(&input.status).ok_or("Invalid status")?;
+
+    // Determine the tasks directory
+    // If folderPath is provided, tasks are in {folderPath}/tasks/{status}/
+    // If empty, tasks are in the root tasks folder
+    let tasksDir = if input.folderPath.is_empty() {
+        tasksDir(&wsPath, "")
+    } else {
+        PathBuf::from(&input.folderPath).join("tasks")
+    };
+
+    let statusPath = tasksDir.join(status.folderName());
+    println!("[reorderTasks] Scanning tasks in: {:?}", statusPath);
+
+    let tasks = scanTasksInStatus(&statusPath, &tasksDir, status);
+    println!("[reorderTasks] Found {} tasks", tasks.len());
+
+    for (index, taskId) in input.taskIds.iter().enumerate() {
+        if let Some(task) = tasks.iter().find(|t| t.frontmatter.id == *taskId) {
+            let newRank = (index + 1) as u32;
+            let newFilename = toFilename(newRank, &task.slug, false);
+            let newPath = statusPath.join(&newFilename);
+
+            if task.path != newPath {
+                println!("[reorderTasks] Renaming {} -> {}", task.path.display(), newPath.display());
+                fs::rename(&task.path, &newPath).map_err(|e| {
+                    println!("[reorderTasks] ERROR: {}", e);
+                    e.to_string()
+                })?;
+            }
+        }
+    }
+    println!("[reorderTasks] SUCCESS");
+    Ok(())
+}

@@ -219,6 +219,7 @@ pub fn run() {
             commands::task::updateTask,
             commands::task::deleteTask,
             commands::task::moveTaskToFolder,
+            commands::task::reorderTasks,
             // Password
             commands::password::getPasswords,
             commands::password::getPasswordById,
