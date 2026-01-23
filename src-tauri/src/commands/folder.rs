@@ -323,4 +323,84 @@ pub fn reorderFolders(_storage: State<'_, StorageState>, input: ReorderFoldersIn
     Ok(())
 }
 
+#[derive(serde::Deserialize)]
+pub struct MoveFolderInput {
+    pub folderPath: String,
+    pub newParentPath: Option<String>, // None means move to root
+}
+
+#[tauri::command]
+pub fn moveFolder(storage: State<'_, StorageState>, input: MoveFolderInput) -> Result<FolderInfo, String> {
+    println!("[moveFolder] Called with folderPath: {}, newParentPath: {:?}",
+             input.folderPath, input.newParentPath);
+
+    let wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
+    let baseDir = foldersDir(&wsPath);
+
+    let oldPath = PathBuf::from(&input.folderPath);
+    if !oldPath.exists() {
+        return Err("Folder does not exist".to_string());
+    }
+
+    // Determine new parent directory
+    let newParentDir = input.newParentPath
+        .map(PathBuf::from)
+        .unwrap_or(baseDir.clone());
+
+    // Prevent moving folder into itself or its children
+    if newParentDir.starts_with(&oldPath) {
+        return Err("Cannot move folder into itself".to_string());
+    }
+
+    // Check if already in the target parent
+    let currentParent = oldPath.parent().ok_or("No parent")?;
+    if currentParent == newParentDir {
+        return Err("Folder is already in this location".to_string());
+    }
+
+    // Get folder slug from current path
+    let filename = oldPath.file_name().and_then(|n| n.to_str()).ok_or("No filename")?;
+    let (_, slug) = parseFilename(filename).ok_or("Invalid folder name")?;
+
+    // Find next rank in new parent
+    let existingFolders = scanFolders(&newParentDir, None);
+    let nextRank = existingFolders.iter().map(|f| f.rank).max().unwrap_or(0) + 1;
+
+    // Create new path
+    let newFolderName = toFilename(nextRank, &slug, true);
+    let newPath = newParentDir.join(&newFolderName);
+
+    println!("[moveFolder] Moving from {:?} to {:?}", oldPath, newPath);
+
+    // Move the folder
+    fs::rename(&oldPath, &newPath).map_err(|e| {
+        println!("[moveFolder] ERROR: {}", e);
+        e.to_string()
+    })?;
+
+    // Load the moved folder info
+    let folderMdPath = newPath.join(".folder.md");
+    let frontmatter = if folderMdPath.exists() {
+        fs::read_to_string(&folderMdPath)
+            .ok()
+            .and_then(|content| parseFrontmatter::<FolderFrontmatter>(&content).map(|(fm, _)| fm))
+    } else {
+        None
+    };
+
+    let children = scanFolders(&newPath, Some(newPath.clone()));
+
+    let folder = Folder {
+        rank: nextRank,
+        slug,
+        path: newPath,
+        parentPath: Some(newParentDir),
+        frontmatter,
+        children,
+    };
+
+    println!("[moveFolder] SUCCESS");
+    Ok(FolderInfo::from(&folder))
+}
+
 

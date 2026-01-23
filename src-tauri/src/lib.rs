@@ -202,6 +202,7 @@ pub fn run() {
             commands::folder::updateFolder,
             commands::folder::deleteFolder,
             commands::folder::reorderFolders,
+            commands::folder::moveFolder,
             // Note
             commands::note::getNotes,
             commands::note::getNoteById,

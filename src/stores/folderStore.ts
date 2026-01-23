@@ -16,6 +16,7 @@ interface FolderState {
     deleteFolder: (path: string) => Promise<void>;
     setCurrentFolder: (folderPath: string | null) => void;
     reorderFolders: (parentPath: string | null, folderPaths: string[]) => Promise<void>;
+    moveFolder: (folderPath: string, newParentPath: string | null) => Promise<void>;
     toggleFavorite: (path: string) => Promise<void>;
     togglePin: (path: string) => Promise<void>;
     setFolderColor: (path: string, color: string) => Promise<void>;
@@ -148,6 +149,16 @@ export const useFolderStore = create<FolderState>((set, get) => ({
         } catch (error) {
             console.error('Failed to reorder folders:', error);
             await get().fetchFolders();
+        }
+    },
+
+    moveFolder: async (folderPath: string, newParentPath: string | null) => {
+        try {
+            await invoke('moveFolder', { input: { folderPath, newParentPath } });
+            await get().fetchFolders();
+        } catch (error) {
+            console.error('Failed to move folder:', error);
+            throw error;
         }
     },
 

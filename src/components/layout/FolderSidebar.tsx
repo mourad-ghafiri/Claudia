@@ -46,6 +46,7 @@ export const FolderSidebar = memo(function FolderSidebar({
         toggleFavorite,
         togglePin,
         setFolderColor,
+        moveFolder,
     } = useFolderStore();
     const { openDeleteConfirm, isSidebarCollapsed, toggleSidebar } = useUIStore();
 
@@ -54,6 +55,21 @@ export const FolderSidebar = memo(function FolderSidebar({
     const [pinnedExpanded, setPinnedExpanded] = useState(true);
     const [foldersExpanded, setFoldersExpanded] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
+
+    // Expanded folders state (for nested folder tree)
+    const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(new Set());
+
+    const toggleFolderExpanded = (folderId: string) => {
+        setExpandedFolderIds(prev => {
+            const next = new Set(prev);
+            if (next.has(folderId)) {
+                next.delete(folderId);
+            } else {
+                next.add(folderId);
+            }
+            return next;
+        });
+    };
 
     // Context menu state
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; folder: FolderInfo } | null>(null);
@@ -122,6 +138,14 @@ export const FolderSidebar = memo(function FolderSidebar({
         }
         try {
             const newFolder = await createFolder(folderName.trim(), parentFolderPath ?? undefined);
+            // Expand parent folder if creating a subfolder
+            if (parentFolderPath) {
+                const parentFolder = flattenFolders(folders).find(f => f.path === parentFolderPath);
+                if (parentFolder && !expandedFolderIds.has(parentFolder.id)) {
+                    setExpandedFolderIds(prev => new Set([...prev, parentFolder.id]));
+                }
+            }
+            // Select the newly created folder
             handleFolderSelect(newFolder.path);
             setFolderName('');
             setParentFolderPath(null);
@@ -207,6 +231,17 @@ export const FolderSidebar = memo(function FolderSidebar({
                 setContextMenu(null);
             }
         },
+        moveToRoot: async () => {
+            if (contextMenu && contextMenu.folder.parentPath) {
+                try {
+                    await moveFolder(contextMenu.folder.path, null);
+                    toast.success('Folder moved to root');
+                } catch (error) {
+                    toast.error('Failed to move folder');
+                }
+                setContextMenu(null);
+            }
+        },
         delete: () => {
             if (contextMenu) {
                 openDeleteConfirm(contextMenu.folder.path, 'folder');
@@ -215,9 +250,11 @@ export const FolderSidebar = memo(function FolderSidebar({
         },
     };
 
-    // Render a single folder item with draggable (for reordering) and droppable (for note drops) support
-    const DraggableFolderItem = ({ folder, indent = 0, isDraggable = true }: { folder: FolderInfo; indent?: number; isDraggable?: boolean }) => {
+    // Render a single folder item with draggable (for reordering) and droppable (for note/folder drops) support
+    const DraggableFolderItem = ({ folder, indent = 0 }: { folder: FolderInfo; indent?: number }) => {
         const isSelected = currentFolderPath === folder.path;
+        const hasChildren = folder.children && folder.children.length > 0;
+        const isExpanded = expandedFolderIds.has(folder.id);
 
         // Draggable hook for drag-and-drop reordering (uses folder.id)
         const {
@@ -228,10 +265,10 @@ export const FolderSidebar = memo(function FolderSidebar({
             isDragging,
         } = useDraggable({
             id: folder.id,
-            disabled: !isDraggable,
+            data: { type: 'folder', folder },
         });
 
-        // Droppable hook for receiving notes AND for folder reorder targets (uses folder-${folder.path})
+        // Droppable hook for receiving notes AND folders (uses folder-${folder.path})
         const { setNodeRef: setDroppableRef, isOver } = useDroppable({ id: `folder-${folder.path}` });
 
         // Combine refs
@@ -263,16 +300,32 @@ export const FolderSidebar = memo(function FolderSidebar({
                 `}
                 style={{ ...style, paddingLeft: `${8 + indent * 16}px` }}
             >
-                {/* Drag handle - only show for draggable folders */}
-                {isDraggable && (
-                    <div
-                        {...attributes}
-                        {...listeners}
-                        className="opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing p-0.5 -ml-1 hover:bg-[#D8D3CC] dark:hover:bg-[#393939] rounded transition-opacity"
-                        onClick={(e) => e.stopPropagation()}
+                {/* Drag handle */}
+                <div
+                    {...attributes}
+                    {...listeners}
+                    className="opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing p-0.5 -ml-1 hover:bg-[#D8D3CC] dark:hover:bg-[#393939] rounded transition-opacity"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <GripVertical className="w-3 h-3 text-[#B5AFA6] dark:text-[#6B6B6B]" />
+                </div>
+                {/* Expand/collapse chevron for folders with children */}
+                {hasChildren ? (
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            toggleFolderExpanded(folder.id);
+                        }}
+                        className="p-0.5 hover:bg-[#D8D3CC] dark:hover:bg-[#393939] rounded"
                     >
-                        <GripVertical className="w-3 h-3 text-[#B5AFA6] dark:text-[#6B6B6B]" />
-                    </div>
+                        {isExpanded ? (
+                            <ChevronDown className="w-3 h-3 text-[#B5AFA6] dark:text-[#6B6B6B]" />
+                        ) : (
+                            <ChevronRight className="w-3 h-3 text-[#B5AFA6] dark:text-[#6B6B6B]" />
+                        )}
+                    </button>
+                ) : (
+                    <div className="w-4" /> // Spacer for alignment
                 )}
                 {folder.color && (
                     <div
@@ -299,13 +352,22 @@ export const FolderSidebar = memo(function FolderSidebar({
         );
     };
 
-    // Render folder with children
-    const renderFolderWithChildren = (folder: FolderInfo, indent: number = 0, isDraggable: boolean = true) => (
-        <div key={folder.path}>
-            <DraggableFolderItem folder={folder} indent={indent} isDraggable={isDraggable && indent === 0} />
-            {folder.children?.map(child => renderFolderWithChildren(child, indent + 1, false))}
-        </div>
-    );
+    // Render folder with children (conditionally based on expansion state)
+    const renderFolderWithChildren = (folder: FolderInfo, indent: number = 0) => {
+        const isExpanded = expandedFolderIds.has(folder.id);
+        const hasChildren = folder.children && folder.children.length > 0;
+
+        return (
+            <div key={folder.path}>
+                <DraggableFolderItem folder={folder} indent={indent} />
+                {hasChildren && isExpanded && (
+                    <div>
+                        {folder.children.map(child => renderFolderWithChildren(child, indent + 1))}
+                    </div>
+                )}
+            </div>
+        );
+    };
 
     // Render section
     const renderSection = (
@@ -314,8 +376,7 @@ export const FolderSidebar = memo(function FolderSidebar({
         items: FolderInfo[],
         expanded: boolean,
         setExpanded: (v: boolean) => void,
-        flat: boolean = false,
-        draggable: boolean = false
+        flat: boolean = false
     ) => {
         if (items.length === 0) return null;
 
@@ -333,8 +394,8 @@ export const FolderSidebar = memo(function FolderSidebar({
                 {expanded && (
                     <div className="mt-1">
                         {flat
-                            ? items.map(f => <DraggableFolderItem key={f.path} folder={f} isDraggable={false} />)
-                            : items.map(f => renderFolderWithChildren(f, 0, draggable))
+                            ? items.map(f => <DraggableFolderItem key={f.path} folder={f} />)
+                            : items.map(f => renderFolderWithChildren(f, 0))
                         }
                     </div>
                 )}
@@ -419,12 +480,12 @@ export const FolderSidebar = memo(function FolderSidebar({
 
                 {!isSidebarCollapsed && (
                     <>
-                        {renderSection('Favorites', <Star className="w-3 h-3 text-[#D4A72C]" />, favoriteFolders, favoritesExpanded, setFavoritesExpanded, true, false)}
-                        {renderSection('Pinned', <Pin className="w-3 h-3 text-[#5B8DEF]" />, pinnedFolders, pinnedExpanded, setPinnedExpanded, true, false)}
+                        {renderSection('Favorites', <Star className="w-3 h-3 text-[#D4A72C]" />, favoriteFolders, favoritesExpanded, setFavoritesExpanded, true)}
+                        {renderSection('Pinned', <Pin className="w-3 h-3 text-[#5B8DEF]" />, pinnedFolders, pinnedExpanded, setPinnedExpanded, true)}
                         {(favoriteFolders.length > 0 || pinnedFolders.length > 0) && regularFolders.length > 0 && (
                             <div className="h-px bg-[#EBE8E4] dark:bg-[#2E2E2E] mx-3 my-2" />
                         )}
-                        {renderSection('Folders', <Folder className="w-3 h-3" />, regularFolders, foldersExpanded, setFoldersExpanded, false, true)}
+                        {renderSection('Folders', <Folder className="w-3 h-3" />, regularFolders, foldersExpanded, setFoldersExpanded, false)}
 
                         {folders.length === 0 && (
                             <div className="text-center py-8 px-4">
@@ -526,6 +587,11 @@ export const FolderSidebar = memo(function FolderSidebar({
                     <button onClick={menuActions.changeColor} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#2D2D2D] dark:text-[#E8E6E3] hover:bg-[#EBE8E4] dark:hover:bg-[#393939]">
                         <Palette className="w-4 h-4" /> Change Color
                     </button>
+                    {contextMenu.folder.parentPath && (
+                        <button onClick={menuActions.moveToRoot} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#2D2D2D] dark:text-[#E8E6E3] hover:bg-[#EBE8E4] dark:hover:bg-[#393939]">
+                            <Home className="w-4 h-4" /> Move to Root
+                        </button>
+                    )}
                     <div className="h-px bg-[#EBE8E4] dark:bg-[#393939] my-1" />
                     <button onClick={menuActions.delete} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#D66565] hover:bg-[#EBE8E4] dark:hover:bg-[#393939]">
                         <Trash2 className="w-4 h-4" /> Delete

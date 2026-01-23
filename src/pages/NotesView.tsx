@@ -239,7 +239,7 @@ const SortableNoteItem = memo(function SortableNoteItem({
 
 export function NotesView() {
     const { notes, loading, fetchNotes, fetchNotesByFolder, createNote, updateNote, reorderNotes, getNoteById, updateNotePositionLocal, moveNoteToFolder, getNoteContent } = useNoteStore();
-    const { currentFolderPath, setCurrentFolder, folders, reorderFolders } = useFolderStore();
+    const { currentFolderPath, setCurrentFolder, moveFolder, getFolderById } = useFolderStore();
     // Tags are now stored directly as string arrays on notes
     const { searchQuery, openDeleteConfirm, selectedNoteId, setSelectedNoteId } = useUIStore();
     const { settings } = useSettingsStore();
@@ -564,14 +564,14 @@ export function NotesView() {
             return;
         }
 
-        // Check if it's a folder
-        const folder = folders.find(f => f.id === activeId);
+        // Check if it's a folder (search recursively through tree)
+        const folder = getFolderById(activeId);
         if (folder) {
             setDraggedFolder(folder);
             setDraggedNote(null);
             return;
         }
-    }, [notes, folders]);
+    }, [notes, getFolderById]);
 
     const handleDragEnd = useCallback(async (event: DragEndEvent) => {
         const { active, over } = event;
@@ -584,23 +584,23 @@ export function NotesView() {
         const activeId = active.id as string;
         const overId = over.id as string;
 
-        // Handle folder reordering
+        // Handle folder movement (drop folder onto another folder to move it inside)
         if (wasDraggingFolder) {
             // overId is in format "folder-{path}" from droppable
             if (typeof overId === 'string' && overId.startsWith('folder-')) {
                 const targetFolderPath = overId.replace('folder-', '');
-                const folderPaths = folders.map(f => f.path);
-                const activeFolder = folders.find(f => f.id === activeId);
-                const overFolder = folders.find(f => f.path === targetFolderPath);
+                // Search recursively through folder tree to find the dragged folder
+                const activeFolder = getFolderById(activeId);
 
-                if (activeFolder && overFolder && activeFolder.path !== overFolder.path) {
-                    const oldIndex = folderPaths.indexOf(activeFolder.path);
-                    const newIndex = folderPaths.indexOf(overFolder.path);
-
-                    if (oldIndex !== -1 && newIndex !== -1) {
-                        const reorderedFolderPaths = arrayMove(folderPaths, oldIndex, newIndex);
-                        await reorderFolders(null, reorderedFolderPaths);
-                        toast.success('Folder reordered');
+                if (activeFolder && activeFolder.path !== targetFolderPath) {
+                    // Check if target is not a descendant of the source (prevent moving into itself)
+                    if (!targetFolderPath.startsWith(activeFolder.path + '/')) {
+                        try {
+                            await moveFolder(activeFolder.path, targetFolderPath);
+                            toast.success('Folder moved');
+                        } catch (error) {
+                            toast.error('Failed to move folder');
+                        }
                     }
                 }
             }
@@ -632,7 +632,7 @@ export function NotesView() {
                 await reorderNotes(currentFolderPath || '', reorderedFilteredNoteIds);
             }
         }
-    }, [draggedFolder, folders, notes, filteredNotes, currentFolderPath, reorderFolders, moveNoteToFolder, reorderNotes]);
+    }, [draggedFolder, getFolderById, notes, filteredNotes, currentFolderPath, moveFolder, moveNoteToFolder, reorderNotes]);
 
     return (
         <DndContext

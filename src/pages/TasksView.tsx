@@ -9,7 +9,6 @@ import {
     DragStartEvent,
     DragEndEvent,
 } from '@dnd-kit/core';
-import { arrayMove } from '@dnd-kit/sortable';
 import { Plus, Folder as FolderIcon } from 'lucide-react';
 import { useTaskStore } from '../stores/taskStore';
 import { useFolderStore } from '../stores/folderStore';
@@ -29,7 +28,7 @@ const columns: { id: TaskStatus; title: string; color: string }[] = [
 
 export function TasksView() {
     const { tasks, fetchTasks, fetchTasksByFolder, updateTask, getTasksByStatus, moveTaskToFolder } = useTaskStore();
-    const { currentFolderPath, setCurrentFolder, folders, reorderFolders } = useFolderStore();
+    const { currentFolderPath, setCurrentFolder, moveFolder, getFolderById } = useFolderStore();
     const { openTaskEditorWithTemplate, searchQuery } = useUIStore();
     const [activeTask, setActiveTask] = useState<Task | null>(null);
     const [draggedFolder, setDraggedFolder] = useState<FolderInfo | null>(null);
@@ -91,13 +90,13 @@ export function TasksView() {
             return;
         }
 
-        // Check if it's a folder
-        const folder = folders.find((f) => f.id === activeId);
+        // Check if it's a folder (search recursively through tree)
+        const folder = getFolderById(activeId);
         if (folder) {
             setDraggedFolder(folder);
             setActiveTask(null);
         }
-    }, [tasks, folders]);
+    }, [tasks, getFolderById]);
 
     const handleDragEnd = useCallback(async (event: DragEndEvent) => {
         const { active, over } = event;
@@ -110,23 +109,23 @@ export function TasksView() {
         const activeId = active.id as string;
         const overId = over.id as string;
 
-        // Handle folder reordering
+        // Handle folder movement (drop folder onto another folder to move it inside)
         if (wasDraggingFolder) {
             // overId is in format "folder-{path}" from droppable
             if (typeof overId === 'string' && overId.startsWith('folder-')) {
                 const targetFolderPath = overId.replace('folder-', '');
-                const folderPaths = folders.map(f => f.path);
-                const activeFolder = folders.find(f => f.id === activeId);
-                const overFolder = folders.find(f => f.path === targetFolderPath);
+                // Search recursively through folder tree to find the dragged folder
+                const activeFolder = getFolderById(activeId);
 
-                if (activeFolder && overFolder && activeFolder.path !== overFolder.path) {
-                    const oldIndex = folderPaths.indexOf(activeFolder.path);
-                    const newIndex = folderPaths.indexOf(overFolder.path);
-
-                    if (oldIndex !== -1 && newIndex !== -1) {
-                        const reorderedFolderPaths = arrayMove(folderPaths, oldIndex, newIndex);
-                        await reorderFolders(null, reorderedFolderPaths);
-                        toast.success('Folder reordered');
+                if (activeFolder && activeFolder.path !== targetFolderPath) {
+                    // Check if target is not a descendant of the source (prevent moving into itself)
+                    if (!targetFolderPath.startsWith(activeFolder.path + '/')) {
+                        try {
+                            await moveFolder(activeFolder.path, targetFolderPath);
+                            toast.success('Folder moved');
+                        } catch (error) {
+                            toast.error('Failed to move folder');
+                        }
                     }
                 }
             }
@@ -171,7 +170,7 @@ export function TasksView() {
                 status: overTask.status,
             });
         }
-    }, [tasks, folders, draggedFolder, moveTaskToFolder, updateTask, reorderFolders]);
+    }, [tasks, draggedFolder, moveTaskToFolder, updateTask, moveFolder, getFolderById]);
 
     // Memoize filtered tasks by status for each column
     // When currentFolderPath is null (All Tasks), show ALL tasks regardless of folder
