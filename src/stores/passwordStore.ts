@@ -17,6 +17,10 @@ interface BatchDecryptedContent {
 // Cache TTL - 5 minutes
 const CACHE_TTL = 5 * 60 * 1000;
 
+// Auto-lock timeout - 10 minutes
+const AUTO_LOCK_TIMEOUT = 10 * 60 * 1000;
+const AUTO_LOCK_CHECK_INTERVAL = 60 * 1000; // Check every minute
+
 interface PasswordState {
     passwords: PasswordInfo[];
     selectedPasswordId: string | null;
@@ -26,6 +30,9 @@ interface PasswordState {
     error: string | null;
     // Decrypted content cache
     decryptedCache: Map<string, CachedContent>;
+    // Auto-lock
+    lastActivity: number;
+    autoLockTimerId: ReturnType<typeof setInterval> | null;
 
     // Actions
     fetchPasswords: (folderPath?: string) => Promise<void>;
@@ -47,6 +54,11 @@ interface PasswordState {
     unlock: (password: string) => Promise<boolean>;
     lock: () => void;
     changeMasterPassword: (current: string, newPassword: string) => Promise<void>;
+
+    // Auto-lock
+    resetActivity: () => void;
+    startAutoLock: () => void;
+    stopAutoLock: () => void;
 }
 
 export const usePasswordStore = create<PasswordState>((set, get) => ({
@@ -57,6 +69,8 @@ export const usePasswordStore = create<PasswordState>((set, get) => ({
     loading: false,
     error: null,
     decryptedCache: new Map(),
+    lastActivity: Date.now(),
+    autoLockTimerId: null,
 
     fetchPasswords: async (folderPath?: string) => {
         set({ loading: true, error: null });
@@ -91,10 +105,13 @@ export const usePasswordStore = create<PasswordState>((set, get) => ({
     },
 
     getDecryptedContent: async (id) => {
-        const { masterPassword, decryptedCache } = get();
+        const { masterPassword, decryptedCache, resetActivity } = get();
         if (!masterPassword) {
             throw new Error('Vault is locked');
         }
+
+        // Reset activity timer on password access
+        resetActivity();
 
         // Check cache first
         const cached = decryptedCache.get(id);
@@ -145,19 +162,21 @@ export const usePasswordStore = create<PasswordState>((set, get) => ({
     },
 
     createPassword: async (input) => {
-        const { masterPassword, fetchPasswords } = get();
+        const { masterPassword, fetchPasswords, resetActivity } = get();
         if (!masterPassword) {
             throw new Error('Vault is locked');
         }
+        resetActivity();
         await invoke('createPassword', { input: { ...input, masterPassword } });
         await fetchPasswords();
     },
 
     updatePassword: async (input) => {
-        const { masterPassword, fetchPasswords, invalidateCache } = get();
+        const { masterPassword, fetchPasswords, invalidateCache, resetActivity } = get();
         if (!masterPassword) {
             throw new Error('Vault is locked');
         }
+        resetActivity();
         await invoke('updatePassword', { input: { ...input, masterPassword } });
         invalidateCache(input.id); // Clear stale cached content for this password
         await fetchPasswords();
@@ -207,23 +226,55 @@ export const usePasswordStore = create<PasswordState>((set, get) => ({
 
     setMasterPassword: async (password) => {
         await invoke('setMasterPassword', { password });
-        set({ isUnlocked: true, masterPassword: password });
+        set({ isUnlocked: true, masterPassword: password, lastActivity: Date.now() });
+        get().startAutoLock();
     },
 
     unlock: async (password) => {
         const isValid = await invoke<boolean>('verifyMasterPassword', { password });
         if (isValid) {
-            set({ isUnlocked: true, masterPassword: password });
+            set({ isUnlocked: true, masterPassword: password, lastActivity: Date.now() });
+            get().startAutoLock();
         }
         return isValid;
     },
 
     lock: () => {
+        get().stopAutoLock();
         set({ isUnlocked: false, masterPassword: null, selectedPasswordId: null, decryptedCache: new Map() });
     },
 
     changeMasterPassword: async (currentPassword, newPassword) => {
         await invoke('changeMasterPassword', { currentPassword, newPassword });
         set({ masterPassword: newPassword });
+        get().resetActivity();
+    },
+
+    // Auto-lock methods
+    resetActivity: () => {
+        set({ lastActivity: Date.now() });
+    },
+
+    startAutoLock: () => {
+        const { autoLockTimerId } = get();
+        // Don't start if already running
+        if (autoLockTimerId) return;
+
+        const timerId = setInterval(() => {
+            const { masterPassword, lastActivity, lock } = get();
+            if (masterPassword && Date.now() - lastActivity > AUTO_LOCK_TIMEOUT) {
+                lock();
+            }
+        }, AUTO_LOCK_CHECK_INTERVAL);
+
+        set({ autoLockTimerId: timerId });
+    },
+
+    stopAutoLock: () => {
+        const { autoLockTimerId } = get();
+        if (autoLockTimerId) {
+            clearInterval(autoLockTimerId);
+            set({ autoLockTimerId: null });
+        }
     },
 }));

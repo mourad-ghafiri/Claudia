@@ -613,8 +613,18 @@ pub fn setMasterPassword(
         return Err("Master password already set. Use changeMasterPassword.".to_string());
     }
 
-    let hash = crypto::hashMasterPassword(&password);
-    fs::write(&hashPath, hash).map_err(|e| e.to_string())
+    let hash = crypto::hashMasterPassword(&password)?;
+    fs::write(&hashPath, &hash).map_err(|e| e.to_string())?;
+
+    // Set restrictive file permissions (owner read/write only) on Unix systems
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&hashPath, fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("Failed to set file permissions: {}", e))?;
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -659,6 +669,16 @@ pub fn changeMasterPassword(
         fs::write(&pwd.path, content).map_err(|e| e.to_string())?;
     }
 
-    let newHash = crypto::hashMasterPassword(&newPassword);
-    fs::write(&hashPath, newHash).map_err(|e| e.to_string())
+    let newHash = crypto::hashMasterPassword(&newPassword)?;
+    fs::write(&hashPath, &newHash).map_err(|e| e.to_string())?;
+
+    // Set restrictive file permissions (owner read/write only) on Unix systems
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&hashPath, fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("Failed to set file permissions: {}", e))?;
+    }
+
+    Ok(())
 }
