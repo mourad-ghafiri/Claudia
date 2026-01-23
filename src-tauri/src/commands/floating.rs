@@ -11,6 +11,7 @@ pub struct FloatingWindowConfig {
     pub note_id: String,  // Item ID (note or task)
     pub item_type: String,
     pub title: String,
+    #[allow(dead_code)] // Reserved for future use (window border color)
     pub color: String,
     pub x: f64,
     pub y: f64,

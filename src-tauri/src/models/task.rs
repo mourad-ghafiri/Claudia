@@ -53,6 +53,7 @@ pub struct Task {
     pub content: String,     // Body content (after frontmatter)
 }
 
+#[allow(dead_code)] // Public API methods for model consistency
 impl Task {
     /// Get the stable ID (UUID from frontmatter)
     pub fn id(&self) -> &str {

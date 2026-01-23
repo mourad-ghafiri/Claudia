@@ -10,7 +10,6 @@ use crate::models::{
     Settings, SettingsOverride, WorkspaceEntry,
     Folder,
     Note,
-    Password,
     Task,
 };
 
@@ -36,6 +35,7 @@ pub fn foldersDir(workspacePath: &str) -> PathBuf {
 
 /// Validate that a user-provided path is within the workspace directory
 /// Returns the validated canonical path or an error if path traversal is detected
+#[allow(dead_code)] // Security utility - to be used for user path validation
 pub fn validatePathWithinWorkspace(workspacePath: &str, userPath: &str) -> Result<PathBuf, String> {
     let workspace = PathBuf::from(workspacePath);
     let workspaceCanonical = workspace.canonicalize()
@@ -197,7 +197,8 @@ pub fn slugify(title: &str) -> String {
 // STORAGE STATE
 // ============================================
 
-/// In-memory cache of workspace data
+/// In-memory cache of workspace data (for future caching optimization)
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct WorkspaceData {
     pub folders: Vec<Folder>,
@@ -211,6 +212,7 @@ pub struct Storage {
     pub globalSettings: RwLock<Settings>,
     pub workspaceOverride: RwLock<SettingsOverride>,
     pub workspaces: RwLock<Vec<WorkspaceEntry>>,
+    #[allow(dead_code)] // Reserved for future caching optimization
     pub data: RwLock<WorkspaceData>,
 }
 

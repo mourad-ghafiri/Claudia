@@ -38,7 +38,6 @@ impl MCPServerManager {
     }
 }
 
-const MCP_PORT: u16 = 44055;
 const MCP_BIND_ADDRESS: &str = "127.0.0.1:44055";
 
 #[tauri::command]

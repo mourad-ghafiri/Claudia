@@ -7,7 +7,7 @@ use rmcp::{
     handler::server::tool::ToolRouter,
     handler::server::wrapper::Parameters,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use schemars::JsonSchema;
 use tauri::Emitter;
 
@@ -155,9 +155,6 @@ pub struct TasksFilterInput {
 pub struct SearchInput {
     pub query: String,
 }
-
-#[derive(Deserialize, JsonSchema)]
-pub struct EmptyInput {}
 
 #[derive(Deserialize, JsonSchema)]
 pub struct CreateFolderInput {

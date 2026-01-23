@@ -5,7 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::State;
 
-use crate::storage::{StorageState, parseFrontmatter, toMarkdown, slugify};
+use crate::storage::{StorageState, parseFrontmatter, toMarkdown};
 use crate::models::{Template, TemplateFrontmatter, TemplateType};
 use super::common::newId;
 

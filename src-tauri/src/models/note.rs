@@ -49,6 +49,7 @@ pub struct Note {
     pub content: String,     // Body content (after frontmatter)
 }
 
+#[allow(dead_code)] // Public API methods for model consistency
 impl Note {
     /// Get the stable ID (UUID from frontmatter)
     pub fn id(&self) -> &str {

@@ -60,6 +60,7 @@ pub struct Password {
     pub encryptedContent: String,
 }
 
+#[allow(dead_code)] // Public API methods for model consistency
 impl Password {
     pub fn id(&self) -> &str {
         &self.frontmatter.id

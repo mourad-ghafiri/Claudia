@@ -96,11 +96,6 @@ pub(crate) fn scanFolders(baseDir: &PathBuf, parentPath: Option<PathBuf>) -> Vec
     folders
 }
 
-#[derive(serde::Deserialize)]
-pub struct GetFoldersInput {
-    // Deprecated: context is no longer used, folders are unified
-}
-
 #[tauri::command]
 pub fn getFolders(storage: State<'_, StorageState>) -> Vec<FolderInfo> {
     println!("[getFolders] Called");

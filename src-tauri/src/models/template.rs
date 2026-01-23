@@ -46,6 +46,7 @@ pub struct TemplateFrontmatter {
     pub order: u32,           // Display order (lower = first)
 }
 
+#[allow(dead_code)] // Constructor for programmatic template creation
 impl TemplateFrontmatter {
     pub fn new(id: String, name: String, description: String) -> Self {
         Self {
@@ -64,14 +65,18 @@ impl TemplateFrontmatter {
 #[derive(Debug, Clone)]
 pub struct Template {
     pub slug: String,              // Folder name (e.g., "meeting-notes")
+    #[allow(dead_code)] // Stored for potential future use (template management)
     pub path: PathBuf,             // Full path to template folder
+    #[allow(dead_code)] // Stored for potential future use (template management)
     pub templatePath: PathBuf,     // Path to template.md
+    #[allow(dead_code)] // Stored for potential future use (asset copying)
     pub assetsPath: PathBuf,       // Path to assets folder
     pub templateType: TemplateType,
     pub frontmatter: TemplateFrontmatter,
     pub content: String,           // Body content (after frontmatter)
 }
 
+#[allow(dead_code)] // Public API methods for model consistency
 impl Template {
     pub fn id(&self) -> &str {
         &self.frontmatter.id
