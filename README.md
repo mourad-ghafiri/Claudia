@@ -86,23 +86,29 @@ A kanban board to manage your to-dos with drag-and-drop between columns.
 
 ### 🔐 Password Manager
 
-Your secure vault for passwords with military-grade encryption.
+Secure local vault for your passwords.
 
 | Feature | Status |
 |---------|:------:|
 | Master password setup | ✅ |
 | AES-256-GCM encryption | ✅ |
-| Argon2 key derivation | ✅ |
+| Argon2id key derivation | ✅ |
 | Store URL, username, password, notes | ✅ |
 | Show/hide passwords | ✅ |
 | One-click copy | ✅ |
-| Color coding | ✅ |
-| Tags | ✅ |
-| Pin passwords | ✅ |
-| Drag & drop reordering | ✅ |
+| Color coding & tags | ✅ |
+| Pin & reorder | ✅ |
 | Change master password | ✅ |
 
-> 🔒 **Security**: Your passwords are encrypted locally using AES-256-GCM with keys derived via Argon2. The master password never leaves your device.
+#### 🔒 Security
+
+| Layer | Technology |
+|-------|------------|
+| Key Derivation | Argon2id |
+| Encryption | AES-256-GCM |
+| Storage | Local only |
+
+> Your master password derives an encryption key via Argon2id. Passwords are encrypted with AES-256-GCM and stored locally. Nothing leaves your device.
 
 ---
 
@@ -118,6 +124,57 @@ A unified folder system that can contain both notes and tasks.
 | Icon customization | ✅ |
 | Pin/favorite folders | ✅ |
 | Delete folders | ✅ |
+
+---
+
+### 📋 Templates
+
+Built-in templates for notes and tasks.
+
+| Type | Templates |
+|------|-----------|
+| **Notes** | Blank, Meeting Notes, Daily Journal, Weekly Review, Project Plan, Decision Document, Feature Spec, Bug Report, Book Notes, Learning Notes, Interview Notes, Sprint Retro |
+| **Tasks** | Blank, Quick Task, Feature Development, Bug Fix, Code Review, Refactoring, Research, Design, Deployment, Meeting Prep, Documentation, Learning |
+
+#### Custom Templates
+
+Create your own templates in `~/.claudia/templates/notes/` or `~/.claudia/templates/tasks/`.
+
+**Structure:**
+```
+~/.claudia/templates/notes/
+└── my-template/
+    ├── template.md    # Required
+    └── assets/        # Optional (for images)
+```
+
+**Example `template.md`:**
+```markdown
+---
+id: "550e8400-e29b-41d4-a716-446655440000"
+name: "My Template"
+description: "A short description"
+category: "productivity"
+icon: "FileText"
+color: "#5B8DEF"
+order: 100
+---
+
+## My Template Content
+
+- [ ] Checklist item
+- [ ] Another item
+```
+
+| Field | Description |
+|-------|-------------|
+| `id` | Unique UUID |
+| `name` | Display name |
+| `description` | Short description |
+| `category` | `basic`, `productivity`, `planning`, `documentation`, `learning`, `development`, `operations` |
+| `icon` | [Lucide icon](https://lucide.dev/icons) name (e.g., `FileText`, `CheckSquare`, `Bug`) |
+| `color` | Hex color (e.g., `#5B8DEF`) |
+| `order` | Sort order (lower = first) |
 
 ---
 
@@ -146,7 +203,7 @@ Pop out notes or tasks as always-on-top floating windows.
 | Notifications | Enable/disable |
 | Notification sound | Enable/disable |
 | Reminder time | Minutes before due |
-| Floating window opacity | 0-100% |
+| Floating window opacity | 50-100% |
 
 ---
 
@@ -170,17 +227,27 @@ Your data is stored as markdown files on your filesystem:
 
 ```
 📁 Your Workspace
-├── 📁 folders/
-│   ├── .folder.md          # Folder metadata (optional)
-│   ├── 000001-my-note.md   # Notes (rank-prefix + slug)
-│   ├── 📁 tasks/
-│   │   ├── 📁 todo/        # Tasks by status
-│   │   ├── 📁 doing/
-│   │   └── 📁 done/
-│   └── 📁 passwords/
-│       └── 000001-login.md # Encrypted passwords
-└── 📁 My Project/          # Subfolders
-    └── ...
+├── config.md                       # Workspace settings override (optional)
+└── 📁 folders/
+    ├── 📁 notes/                   # Root-level notes
+    │   └── 000001-my-note.md       # Note file (rank-slug.md)
+    ├── 📁 tasks/                   # Root-level tasks
+    │   ├── 📁 todo/                # Tasks by status
+    │   │   └── 000001-task.md
+    │   ├── 📁 doing/
+    │   ├── 📁 done/
+    │   └── 📁 archived/
+    ├── 📁 passwords/               # Root-level passwords
+    │   └── 000001-login.md         # Encrypted password file
+    └── 📁 My Project/              # A subfolder
+        ├── .folder.md              # Folder metadata
+        ├── 📁 notes/               # Folder's notes
+        ├── 📁 tasks/               # Folder's tasks
+        │   ├── 📁 todo/
+        │   ├── 📁 doing/
+        │   ├── 📁 done/
+        │   └── 📁 archived/
+        └── 📁 passwords/           # Folder's passwords
 ```
 
 **Benefits:**
@@ -209,8 +276,11 @@ npm install
 # Run in development mode
 npm run tauri dev
 
-# Build for production
+# Build for production (includes DMG)
 npm run tauri build
+
+# Build app only (no DMG, faster)
+npm run release
 ```
 
 ---
@@ -231,22 +301,34 @@ npm run tauri build
 ## ❓ FAQ
 
 **Q: Where is my data stored?**
-> In the workspace folder you chose. You can find the path in Settings.
+> In the workspace folder you chose. Notes and tasks are markdown files.
 
 **Q: Can I sync between devices?**
-> Yes! Put your workspace in a synced folder (Dropbox, iCloud, Google Drive).
-
-**Q: Is my password vault secure?**
-> Yes! We use AES-256-GCM encryption with Argon2 key derivation. Your master password never leaves your device.
+> Yes. Put your workspace in Dropbox, iCloud, or Google Drive.
 
 **Q: Can I use Claudia offline?**
-> Absolutely! Claudia works 100% offline. No internet required.
+> Yes. No internet required.
 
 **Q: How do I backup my data?**
-> Just copy your workspace folder. That's it!
+> Copy your workspace folder.
 
 **Q: Does Claudia collect any data?**
-> No. Zero tracking, zero analytics, zero cloud. Your data stays on your device.
+> No. Zero tracking, zero analytics, zero cloud.
+
+**Q: Can I have multiple workspaces?**
+> Yes. Each workspace is a separate folder.
+
+**Q: What if I forget my master password?**
+> No recovery possible. This is by design for security.
+
+**Q: Are passwords sent to any server?**
+> No. Everything stays local.
+
+**Q: Can I create custom templates?**
+> Yes. Add folders to `~/.claudia/templates/notes/` or `~/.claudia/templates/tasks/`.
+
+**Q: What is MCP?**
+> Model Context Protocol. Lets AI assistants like Claude manage your notes and tasks. Runs locally only.
 
 ---
 
