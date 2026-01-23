@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useCallback, memo, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Lock, Eye, EyeOff, Copy, Pin, Trash2, Edit2, Key, Folder as FolderIcon, Globe, User, FileText, ExternalLink, GripVertical } from 'lucide-react';
-import { open as openUrl } from '@tauri-apps/plugin-shell';
+import { Plus, Lock, Eye, EyeOff, Copy, Pin, Trash2, Edit2, Key, Folder as FolderIcon, ExternalLink, GripVertical, Globe, User, FileText } from 'lucide-react';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { usePasswordStore } from '../stores/passwordStore';
 import { useFolderStore } from '../stores/folderStore';
 import { useUIStore } from '../stores/uiStore';
@@ -454,6 +454,7 @@ export function PasswordsView() {
 }
 
 // Sortable Password Card Component - memoized
+// Redesigned to match Notes and Tasks card design pattern
 const SortablePasswordCard = memo(function SortablePasswordCard({
     password,
     onCopy,
@@ -528,8 +529,21 @@ const SortablePasswordCard = memo(function SortablePasswordCard({
 
     const passwordTags = password.tags || [];
 
-    const handleCardClick = (e: React.MouseEvent) => {
-        e.preventDefault();
+    // Memoize date formatting
+    const formattedDate = useMemo(() => {
+        const date = new Date(password.updated);
+        return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    }, [password.updated]);
+
+    const handleOpenUrl = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (decrypted?.url) {
+            const url = decrypted.url.startsWith('http') ? decrypted.url : `https://${decrypted.url}`;
+            openUrl(url).catch((err) => {
+                console.error('Failed to open URL:', err);
+                toast.error('Failed to open URL');
+            });
+        }
     };
 
     return (
@@ -539,13 +553,12 @@ const SortablePasswordCard = memo(function SortablePasswordCard({
                 (cardRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
             }}
             style={style}
-            onClick={handleCardClick}
             onMouseEnter={() => setShowActions(true)}
             onMouseLeave={() => setShowActions(false)}
             className={`
                 group relative bg-white dark:bg-[#2E2E2E] rounded-xl shadow-sm
-                border-l-4 py-4 pr-4 pl-8 cursor-pointer select-text mb-3 mx-2
-                hover:shadow-md transition-all duration-150
+                border-l-4 py-3 pr-3 pl-7 cursor-default select-text mb-2 mx-2
+                hover:shadow-md transition-shadow duration-150
                 ${isDragging ? 'shadow-lg ring-2 ring-[#DA7756]' : ''}
             `}
         >
@@ -553,140 +566,112 @@ const SortablePasswordCard = memo(function SortablePasswordCard({
             <div
                 {...attributes}
                 {...listeners}
-                className="absolute left-1.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing p-1 hover:bg-[#EBE8E4] dark:hover:bg-[#393939] rounded transition-opacity z-10"
+                className="absolute left-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing p-1 hover:bg-[#EBE8E4] dark:hover:bg-[#393939] rounded transition-opacity z-10"
                 onClick={(e) => e.stopPropagation()}
             >
-                <GripVertical className="w-4 h-4 text-[#B5AFA6] dark:text-[#6B6B6B]" />
+                <GripVertical className="w-3.5 h-3.5 text-[#B5AFA6] dark:text-[#6B6B6B]" />
             </div>
 
-            {/* Header: Title + Pinned */}
-            <div className="flex items-center gap-3 mb-3">
-                <Key className="w-5 h-5 text-[#DA7756] flex-shrink-0" />
-                <h3 className="font-semibold text-[#2D2D2D] dark:text-[#E8E6E3] text-base flex-1 truncate">
-                    {password.title}
-                </h3>
-                {password.pinned && (
-                    <Pin className="w-4 h-4 text-[#DA7756] flex-shrink-0" />
-                )}
+            {/* Type indicator + Pinned */}
+            <div className="absolute top-2 right-2 flex items-center gap-1">
+                <Key className="w-3 h-3 text-[#DA7756] opacity-50" />
+                {password.pinned && <Pin className="w-3 h-3 text-[#DA7756]" />}
             </div>
 
-            {/* Content Grid */}
-            <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-                {/* URL - full width */}
-                <div className="col-span-2">
-                    <div className="flex items-center gap-2">
-                        <Globe className="w-4 h-4 text-[#9A948A] flex-shrink-0" />
-                        {!hasLoadedContent ? (
-                            <span className="text-sm text-[#B5AFA6] dark:text-[#6B6B6B]">Loading...</span>
-                        ) : decrypted?.url ? (
-                            <button
-                                className="text-sm text-[#3B82F6] hover:underline truncate flex-1 text-left flex items-center gap-1"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    const url = decrypted.url.startsWith('http') ? decrypted.url : `https://${decrypted.url}`;
-                                    openUrl(url);
-                                }}
-                                onMouseDown={(e) => e.stopPropagation()}
-                            >
-                                <span className="truncate">{decrypted.url}</span>
-                                <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-50" />
-                            </button>
-                        ) : (
-                            <span className="text-sm text-[#B5AFA6] dark:text-[#6B6B6B] italic">No URL</span>
+            {/* Row 1: Title */}
+            <h3 className="font-medium text-[#2D2D2D] dark:text-[#E8E6E3] text-sm truncate pr-10">
+                {password.title}
+            </h3>
+
+            {hasLoadedContent ? (
+                <>
+                    {/* Row 2: Description */}
+                    {decrypted?.notes && (
+                        <div className="mt-1 flex items-center gap-1.5">
+                            <FileText className="w-3 h-3 text-[#9A948A] flex-shrink-0" />
+                            <span className="text-xs text-[#6B6B6B] dark:text-[#B5AFA6] truncate">{decrypted.notes}</span>
+                        </div>
+                    )}
+
+                    {/* Row 3: URL | Username | Password */}
+                    <div className="mt-1.5 flex items-center gap-4 text-xs">
+                        {/* URL */}
+                        {decrypted?.url && (
+                            <div className="flex items-center gap-1 min-w-0 max-w-[30%]">
+                                <Globe className="w-3 h-3 text-[#9A948A] flex-shrink-0" />
+                                <span className="text-[#3B82F6] truncate">{decrypted.url}</span>
+                                <button
+                                    onClick={handleOpenUrl}
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                    className="p-0.5 hover:bg-[#F5F3F0] dark:hover:bg-[#393939] rounded flex-shrink-0"
+                                    title="Open in browser"
+                                >
+                                    <ExternalLink className="w-3 h-3 text-[#3B82F6]" />
+                                </button>
+                            </div>
+                        )}
+
+                        {/* Username */}
+                        {decrypted?.username && (
+                            <div className="flex items-center gap-1 min-w-0 max-w-[30%]">
+                                <User className="w-3 h-3 text-[#9A948A] flex-shrink-0" />
+                                <span className="text-[#2D2D2D] dark:text-[#E8E6E3] truncate">{decrypted.username}</span>
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        copyTextToClipboard(decrypted.username);
+                                        toast.success('Username copied');
+                                    }}
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                    className="p-0.5 hover:bg-[#F5F3F0] dark:hover:bg-[#393939] rounded flex-shrink-0"
+                                    title="Copy username"
+                                >
+                                    <Copy className="w-3 h-3 text-[#9A948A]" />
+                                </button>
+                            </div>
+                        )}
+
+                        {/* Password */}
+                        {decrypted?.password && (
+                            <div className="flex items-center gap-1 min-w-0">
+                                <Key className="w-3 h-3 text-[#9A948A] flex-shrink-0" />
+                                <span className="font-mono text-[#DA7756] truncate max-w-[80px]">
+                                    {showPassword ? decrypted.password : '••••••••'}
+                                </span>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); setShowPassword(!showPassword); }}
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                    className="p-0.5 hover:bg-[#F5F3F0] dark:hover:bg-[#393939] rounded flex-shrink-0"
+                                    title={showPassword ? 'Hide' : 'Show'}
+                                >
+                                    {showPassword ? <EyeOff className="w-3 h-3 text-[#9A948A]" /> : <Eye className="w-3 h-3 text-[#9A948A]" />}
+                                </button>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); onCopy(); }}
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                    className="p-0.5 hover:bg-[#F5F3F0] dark:hover:bg-[#393939] rounded flex-shrink-0"
+                                    title="Copy password"
+                                >
+                                    <Copy className="w-3 h-3 text-[#9A948A]" />
+                                </button>
+                            </div>
                         )}
                     </div>
-                </div>
+                </>
+            ) : (
+                <div className="mt-1 text-xs text-[#B5AFA6] dark:text-[#6B6B6B]">Loading...</div>
+            )}
 
-                {/* Username */}
-                <div className="flex items-center gap-2">
-                    <User className="w-4 h-4 text-[#9A948A] flex-shrink-0" />
-                    {!hasLoadedContent ? (
-                        <span className="text-sm text-[#B5AFA6] dark:text-[#6B6B6B]">...</span>
-                    ) : decrypted?.username ? (
-                        <>
-                            <span className="text-sm text-[#2D2D2D] dark:text-[#E8E6E3] truncate flex-1">
-                                {decrypted.username}
-                            </span>
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    copyTextToClipboard(decrypted.username);
-                                    toast.success('Username copied');
-                                }}
-                                onMouseDown={(e) => e.stopPropagation()}
-                                className="p-1 hover:bg-[#F5F3F0] dark:hover:bg-[#393939] rounded transition-colors"
-                            >
-                                <Copy className="w-3.5 h-3.5 text-[#9A948A]" />
-                            </button>
-                        </>
-                    ) : (
-                        <span className="text-sm text-[#B5AFA6] dark:text-[#6B6B6B] italic">No username</span>
-                    )}
-                </div>
-
-                {/* Password */}
-                <div className="flex items-center gap-2">
-                    <Key className="w-4 h-4 text-[#9A948A] flex-shrink-0" />
-                    {!hasLoadedContent ? (
-                        <span className="text-sm text-[#B5AFA6] dark:text-[#6B6B6B]">...</span>
-                    ) : decrypted?.password ? (
-                        <>
-                            <span className="text-sm font-mono text-[#DA7756] truncate flex-1">
-                                {showPassword ? decrypted.password : '••••••••••••'}
-                            </span>
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    setShowPassword(!showPassword);
-                                }}
-                                onMouseDown={(e) => e.stopPropagation()}
-                                className="p-1 hover:bg-[#F5F3F0] dark:hover:bg-[#393939] rounded transition-colors"
-                            >
-                                {showPassword ? (
-                                    <EyeOff className="w-3.5 h-3.5 text-[#9A948A]" />
-                                ) : (
-                                    <Eye className="w-3.5 h-3.5 text-[#9A948A]" />
-                                )}
-                            </button>
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    onCopy();
-                                }}
-                                onMouseDown={(e) => e.stopPropagation()}
-                                className="p-1 hover:bg-[#F5F3F0] dark:hover:bg-[#393939] rounded transition-colors"
-                            >
-                                <Copy className="w-3.5 h-3.5 text-[#9A948A]" />
-                            </button>
-                        </>
-                    ) : (
-                        <span className="text-sm text-[#B5AFA6] dark:text-[#6B6B6B] italic">No password</span>
-                    )}
-                </div>
-
-                {/* Notes - full width */}
-                {hasLoadedContent && decrypted?.notes && (
-                    <div className="col-span-2 flex items-start gap-2">
-                        <FileText className="w-4 h-4 text-[#9A948A] flex-shrink-0 mt-0.5" />
-                        <span className="text-sm text-[#6B6B6B] dark:text-[#B5AFA6] line-clamp-2">
-                            {decrypted.notes}
+            {/* Row 4: All tags + timestamp */}
+            <div className="mt-2 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1 flex-wrap flex-1 min-w-0">
+                    {passwordTags.map((tag, index) => (
+                        <span key={`${tag}-${index}`} className="px-1.5 py-0.5 text-[9px] rounded bg-[#DA7756]/10 text-[#DA7756]">
+                            {tag}
                         </span>
-                    </div>
-                )}
-
-                {/* Tags - full width */}
-                {passwordTags.length > 0 && (
-                    <div className="col-span-2 flex items-center gap-2 pt-1">
-                        {passwordTags.map((tag, index) => (
-                            <span
-                                key={`${tag}-${index}`}
-                                className="px-2 py-1 text-xs rounded-md bg-[#DA7756]/10 text-[#DA7756] font-medium"
-                            >
-                                {tag}
-                            </span>
-                        ))}
-                    </div>
-                )}
+                    ))}
+                </div>
+                <span className="text-[10px] text-[#B5AFA6] dark:text-[#6B6B6B] flex-shrink-0">{formattedDate}</span>
             </div>
 
             {/* Actions overlay */}
@@ -694,57 +679,18 @@ const SortablePasswordCard = memo(function SortablePasswordCard({
                 <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    className="absolute top-3 right-3 flex items-center gap-1 bg-white dark:bg-[#2E2E2E] rounded-lg shadow-md border border-[#EBE8E4] dark:border-[#393939] p-1"
+                    className="absolute bottom-2 right-2 flex items-center gap-1 bg-white dark:bg-[#2E2E2E] rounded-lg shadow-sm border border-[#EBE8E4] dark:border-[#393939] p-0.5"
                     onClick={(e) => e.stopPropagation()}
                     onMouseDown={(e) => e.stopPropagation()}
                 >
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="w-8 h-8 text-[#6B6B6B] hover:text-[#DA7756]"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onEdit();
-                        }}
-                        title="Edit"
-                    >
-                        <Edit2 className="w-4 h-4" />
+                    <Button variant="ghost" size="icon" className="w-7 h-7 text-[#6B6B6B] hover:text-[#DA7756]" onClick={(e) => { e.stopPropagation(); onEdit(); }} title="Edit">
+                        <Edit2 className="w-3.5 h-3.5" />
                     </Button>
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="w-8 h-8 text-[#6B6B6B] hover:text-[#DA7756]"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onCopy();
-                        }}
-                        title="Copy password"
-                    >
-                        <Copy className="w-4 h-4" />
+                    <Button variant="ghost" size="icon" className="w-7 h-7 text-[#6B6B6B] hover:text-[#DA7756]" onClick={(e) => { e.stopPropagation(); onPin(); }} title={password.pinned ? 'Unpin' : 'Pin'}>
+                        <Pin className={`w-3.5 h-3.5 ${password.pinned ? 'text-[#DA7756]' : ''}`} />
                     </Button>
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="w-8 h-8 text-[#6B6B6B] hover:text-[#DA7756]"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onPin();
-                        }}
-                        title={password.pinned ? 'Unpin' : 'Pin'}
-                    >
-                        <Pin className={`w-4 h-4 ${password.pinned ? 'text-[#DA7756]' : ''}`} />
-                    </Button>
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="w-8 h-8 text-[#E57373] hover:text-[#D32F2F]"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onDelete();
-                        }}
-                        title="Delete"
-                    >
-                        <Trash2 className="w-4 h-4" />
+                    <Button variant="ghost" size="icon" className="w-7 h-7 text-[#E57373] hover:text-[#D32F2F]" onClick={(e) => { e.stopPropagation(); onDelete(); }} title="Delete">
+                        <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                 </motion.div>
             )}
