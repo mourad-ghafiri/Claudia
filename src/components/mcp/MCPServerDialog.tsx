@@ -152,7 +152,7 @@ export function MCPServerDialog({ isOpen, onClose }: MCPServerDialogProps) {
                                     <div className="flex gap-2 p-2 bg-blue-50 dark:bg-blue-900/10 rounded-lg border border-blue-100 dark:border-blue-900/20">
                                         <AlertCircle className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
                                         <p className="text-xs text-blue-600 dark:text-blue-400 leading-relaxed">
-                                            Add this configuration to your Claude Desktop settings or any MCP-compatible client to access your notes and tasks.
+                                            Add this configuration to your MCP-compatible client to access your notes and tasks.
                                         </p>
                                     </div>
                                 </motion.div>

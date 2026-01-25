@@ -26,7 +26,7 @@ const columns: { id: TaskStatus; title: string; color: string }[] = [
   { id: 'done', title: 'Done', color: 'green' },
 ];
 
-const columnIds: TaskStatus[] = ['todo', 'doing', 'done', 'archived'];
+const columnIds: TaskStatus[] = ['todo', 'doing', 'done'];
 
 export function KanbanBoard() {
   const { tasks, fetchTasks, fetchTasksByFolder, updateTask, reorderTasks } = useTaskStore();
@@ -55,7 +55,6 @@ export function KanbanBoard() {
     todo: [],
     doing: [],
     done: [],
-    archived: [],
   });
 
   const sensors = useSensors(
@@ -85,7 +84,6 @@ export function KanbanBoard() {
       todo: filteredTasks.filter(t => t.status === 'todo').sort((a, b) => a.rank - b.rank),
       doing: filteredTasks.filter(t => t.status === 'doing').sort((a, b) => a.rank - b.rank),
       done: filteredTasks.filter(t => t.status === 'done').sort((a, b) => a.rank - b.rank),
-      archived: filteredTasks.filter(t => t.status === 'archived').sort((a, b) => a.rank - b.rank),
     });
   }, [tasks, currentFolderPath]);
 
@@ -240,7 +238,6 @@ export function KanbanBoard() {
       todo: filteredTasks.filter(t => t.status === 'todo').sort((a, b) => a.rank - b.rank),
       doing: filteredTasks.filter(t => t.status === 'doing').sort((a, b) => a.rank - b.rank),
       done: filteredTasks.filter(t => t.status === 'done').sort((a, b) => a.rank - b.rank),
-      archived: filteredTasks.filter(t => t.status === 'archived').sort((a, b) => a.rank - b.rank),
     });
   };
 

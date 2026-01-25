@@ -11,7 +11,8 @@ Claudia is a **desktop productivity app** built with [Tauri](https://tauri.app/)
 **Key highlights:**
 - 📝 **Notes** with markdown, code highlighting, and Mermaid diagrams
 - ✅ **Tasks** with a kanban board (Todo → Doing → Done)
-- 🔐 **Passwords** with AES-256-GCM encryption
+- 🔐 **Passwords** securely stored with encryption
+- 🔒 **Full encryption** — all your data is encrypted with a master password
 - 🪟 **Floating windows** that stay on top of everything
 - 🎨 **Beautiful themes** — light, dark, or system
 - 🤖 **MCP integration** — works with Claude and AI assistants
@@ -71,7 +72,6 @@ A kanban board to manage your to-dos with drag-and-drop between columns.
 | **Todo** | Tasks waiting to be started |
 | **Doing** | Tasks you're working on |
 | **Done** | Completed tasks |
-| **Archived** | Old tasks (status available in data model) |
 
 | Feature | Status |
 |---------|:------:|
@@ -86,29 +86,44 @@ A kanban board to manage your to-dos with drag-and-drop between columns.
 
 ### 🔐 Password Manager
 
-Secure local vault for your passwords.
+Secure local vault for your passwords, integrated with the unified encryption system.
+
+| Feature | Status |
+|---------|:------:|
+| Store URL, username, password, notes | ✅ |
+| Show/hide passwords | ✅ |
+| One-click copy to clipboard | ✅ |
+| Auto-clear clipboard after 30 seconds | ✅ |
+| Open URL in browser | ✅ |
+| Color coding & tags | ✅ |
+| Pin & reorder | ✅ |
+| Drag & drop to folders | ✅ |
+
+---
+
+### 🔒 Unified Encryption System
+
+All your data (notes, tasks, passwords, and folder metadata) is encrypted with a single master password.
 
 | Feature | Status |
 |---------|:------:|
 | Master password setup | ✅ |
 | AES-256-GCM encryption | ✅ |
 | Argon2id key derivation | ✅ |
-| Store URL, username, password, notes | ✅ |
-| Show/hide passwords | ✅ |
-| One-click copy | ✅ |
-| Color coding & tags | ✅ |
-| Pin & reorder | ✅ |
 | Change master password | ✅ |
+| Auto-lock on inactivity | ✅ |
+| Encrypted file format | ✅ |
 
-#### 🔒 Security
+#### Security Architecture
 
 | Layer | Technology |
 |-------|------------|
-| Key Derivation | Argon2id |
-| Encryption | AES-256-GCM |
-| Storage | Local only |
+| Key Derivation | Argon2id (memory-hard) |
+| Encryption | AES-256-GCM (authenticated) |
+| Password Hashing | Argon2 with random salt |
+| Storage | Local only, encrypted at rest |
 
-> Your master password derives an encryption key via Argon2id. Passwords are encrypted with AES-256-GCM and stored locally. Nothing leaves your device.
+> When you set a master password, Claudia derives an encryption key using Argon2id. All content is encrypted with AES-256-GCM before being written to disk. The encrypted file format (`CLAUDIA-ENCRYPTED-v1`) stores metadata and content separately, allowing efficient list views while keeping everything secure. Nothing ever leaves your device.
 
 ---
 
@@ -124,6 +139,7 @@ A unified folder system that can contain both notes and tasks.
 | Icon customization | ✅ |
 | Pin/favorite folders | ✅ |
 | Delete folders | ✅ |
+| Trash/Recycle bin | ✅ |
 
 ---
 
@@ -223,39 +239,54 @@ Claudia includes a built-in MCP (Model Context Protocol) server for AI assistant
 
 ## 💾 Data Storage
 
-Your data is stored as markdown files on your filesystem:
+Your data is stored as encrypted files on your filesystem:
 
 ```
 📁 Your Workspace
+├── .vault                          # Master password hash (for verification)
 ├── config.md                       # Workspace settings override (optional)
+├── 📁 .trash/                      # Deleted items (recoverable)
+│   ├── 📁 notes/
+│   ├── 📁 tasks/
+│   │   ├── 📁 todo/
+│   │   ├── 📁 doing/
+│   │   └── 📁 done/
+│   └── 📁 passwords/
 └── 📁 folders/
     ├── 📁 notes/                   # Root-level notes
-    │   └── 000001-my-note.md       # Note file (rank-slug.md)
+    │   └── {uuid}.md               # Encrypted note file
     ├── 📁 tasks/                   # Root-level tasks
     │   ├── 📁 todo/                # Tasks by status
-    │   │   └── 000001-task.md
+    │   │   └── {uuid}.md           # Encrypted task file
     │   ├── 📁 doing/
-    │   ├── 📁 done/
-    │   └── 📁 archived/
+    │   └── 📁 done/
     ├── 📁 passwords/               # Root-level passwords
-    │   └── 000001-login.md         # Encrypted password file
-    └── 📁 My Project/              # A subfolder
-        ├── .folder.md              # Folder metadata
+    │   └── {uuid}.md               # Encrypted password file
+    └── 📁 {folder-uuid}/           # A subfolder
+        ├── .folder.md              # Encrypted folder metadata
         ├── 📁 notes/               # Folder's notes
         ├── 📁 tasks/               # Folder's tasks
         │   ├── 📁 todo/
         │   ├── 📁 doing/
-        │   ├── 📁 done/
-        │   └── 📁 archived/
+        │   └── 📁 done/
         └── 📁 passwords/           # Folder's passwords
 ```
 
+**Encrypted File Format:**
+```
+CLAUDIA-ENCRYPTED-v1
+[METADATA]
+<base64-encrypted-yaml-frontmatter>
+[CONTENT]
+<base64-encrypted-body>
+```
+
 **Benefits:**
-- 📖 Readable markdown files
+- 🔒 Encrypted at rest — your data is secure even if your device is compromised
 - 💾 Easy to backup — just copy the folder
-- 🔄 Git-friendly for version control
-- ☁️ Sync with Dropbox, iCloud, etc.
-- 🔒 Private — 100% local, no cloud
+- 🔄 Git-friendly for version control (encrypted blobs)
+- ☁️ Sync with Dropbox, iCloud, etc. (safely encrypted)
+- 🏠 Private — 100% local, no cloud dependency
 
 ---
 
@@ -289,11 +320,12 @@ npm run release
 
 | Layer | Technology |
 |-------|------------|
-| Frontend | React, TypeScript, Vite |
-| Styling | Vanilla CSS, Framer Motion |
+| Frontend | React 19, TypeScript, Vite |
+| Styling | Tailwind CSS 4, Framer Motion |
 | State | Zustand |
+| Editor | CodeMirror 6, Mermaid |
 | Backend | Rust, Tauri v2 |
-| Encryption | AES-256-GCM, Argon2 |
+| Encryption | AES-256-GCM, Argon2id |
 | MCP | rmcp SDK |
 
 ---
@@ -301,7 +333,7 @@ npm run release
 ## ❓ FAQ
 
 **Q: Where is my data stored?**
-> In the workspace folder you chose. Notes and tasks are markdown files.
+> In the workspace folder you chose. Notes, tasks and passwords are encrypted markdown files.
 
 **Q: Can I sync between devices?**
 > Yes. Put your workspace in Dropbox, iCloud, or Google Drive.
@@ -328,7 +360,16 @@ npm run release
 > Yes. Add folders to `~/.claudia/templates/notes/` or `~/.claudia/templates/tasks/`.
 
 **Q: What is MCP?**
-> Model Context Protocol. Lets AI assistants like Claude manage your notes and tasks. Runs locally only.
+> Model Context Protocol. Lets AI assistants like Claude manage your notes and tasks.
+
+**Q: Is all my data encrypted ?**
+> Yes. All notes, tasks, passwords, and folder metadata are encrypted with your master password using AES-256-GCM.
+
+**Q: How does the auto-lock feature work?**
+> The vault automatically locks after a period of inactivity to protect your data. User interactions (clicks, keystrokes, mouse movements) reset the inactivity timer.
+
+**Q: Can I access my Claudia data from my phone?**
+> Non, Claudia is a desktop app (macOS, Windows, Linux).
 
 ---
 
@@ -341,5 +382,5 @@ This work is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/
 <p align="center">
   <b>Made with ❤️ for people who love staying organized</b>
   <br><br>
-  <i>Claudia v0.2.0</i>
+  <i>Claudia v1.0.0</i>
 </p>

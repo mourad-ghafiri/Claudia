@@ -3,6 +3,7 @@
 
 mod commands;
 mod crypto;
+mod encrypted_storage;
 mod mcp;
 mod models;
 mod storage;
@@ -131,7 +132,7 @@ pub fn run() {
 
             // Initialize storage
             let storage = storage::initStorage().expect("Failed to initialize storage");
-            
+
             // Load current workspace if set
             {
                 let settings = storage.globalSettings.read();
@@ -139,8 +140,14 @@ pub fn run() {
                     println!("Current workspace: {}", wsPath);
                 }
             }
-            
+
             app.manage(storage);
+
+            // Show the main window on app start
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
 
             // Initialize MCP server manager
             app.manage(MCPServerManager::new());
@@ -230,10 +237,19 @@ pub fn run() {
             commands::password::deletePassword,
             commands::password::reorderPasswords,
             commands::password::movePasswordToFolder,
-            commands::password::isMasterPasswordSet,
-            commands::password::setMasterPassword,
-            commands::password::verifyMasterPassword,
-            commands::password::changeMasterPassword,
+            // Vault
+            commands::vault::isVaultSetup,
+            commands::vault::isVaultUnlocked,
+            commands::vault::setupMasterPassword,
+            commands::vault::unlockVault,
+            commands::vault::lockVault,
+            commands::vault::changeMasterPasswordVault,
+            commands::vault::updateVaultActivity,
+            // Passwords access (auto-lock for passwords only)
+            commands::vault::isPasswordsAccessUnlocked,
+            commands::vault::unlockPasswordsAccess,
+            commands::vault::lockPasswordsAccess,
+            commands::vault::updatePasswordsActivity,
             // Floating window
             commands::floating::createFloatingWindow,
             commands::floating::showFloatingWindow,
@@ -249,6 +265,13 @@ pub fn run() {
             commands::template::getTemplates,
             commands::template::getTemplateContent,
             commands::template::initializeDefaultTemplates,
+            // Trash
+            commands::trash::listTrashNotes,
+            commands::trash::listTrashTasks,
+            commands::trash::listTrashPasswords,
+            commands::trash::getTrashCounts,
+            commands::trash::emptyTrash,
+            commands::trash::restoreAllFromTrash,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -8,6 +8,10 @@ interface UIState {
     currentView: ViewType;
     setCurrentView: (view: ViewType) => void;
 
+    // Trash selection
+    isTrashSelected: boolean;
+    setTrashSelected: (selected: boolean) => void;
+
     // Selected items (persisted across view switches)
     selectedNoteId: string | null;
     setSelectedNoteId: (id: string | null) => void;
@@ -61,6 +65,10 @@ export const useUIStore = create<UIState>((set) => ({
     // View state
     currentView: 'notes',  // Default to notes, will be overridden by settings.defaultMode
     setCurrentView: (view) => set({ currentView: view }),
+
+    // Trash selection
+    isTrashSelected: false,
+    setTrashSelected: (selected) => set({ isTrashSelected: selected }),
 
     // Selected items (persisted across view switches)
     selectedNoteId: null,

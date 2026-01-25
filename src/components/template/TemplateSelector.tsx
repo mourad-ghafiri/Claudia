@@ -54,16 +54,18 @@ export function TemplateSelector({
 
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [selecting, setSelecting] = useState(false);
 
   // Initialize templates on mount
   useEffect(() => {
     initializeDefaultTemplates();
   }, [initializeDefaultTemplates]);
 
-  // Fetch templates when modal opens
+  // Fetch templates when modal opens and reset state
   useEffect(() => {
     if (isOpen) {
       fetchTemplates(templateType);
+      setSelecting(false);
     }
   }, [isOpen, templateType, fetchTemplates]);
 
@@ -106,9 +108,17 @@ export function TemplateSelector({
   }, [filteredTemplates, selectedCategory]);
 
   const handleSelectTemplate = async (template: TemplateInfo) => {
-    const content = await getTemplateContent(templateType, template.id);
-    onSelect(content, template);
-    onClose();
+    // Prevent double-click creating multiple items
+    if (selecting) return;
+    setSelecting(true);
+
+    try {
+      const content = await getTemplateContent(templateType, template.id);
+      onSelect(content, template);
+      onClose();
+    } finally {
+      setSelecting(false);
+    }
   };
 
   return (
@@ -189,9 +199,14 @@ export function TemplateSelector({
                         <motion.button
                           key={template.id}
                           onClick={() => handleSelectTemplate(template)}
-                          whileHover={{ scale: 1.02 }}
-                          whileTap={{ scale: 0.98 }}
-                          className="p-4 bg-[#F5F3F0] dark:bg-[#2E2E2E] rounded-xl text-left hover:bg-[#EBE8E4] dark:hover:bg-[#393939] transition-colors group border-2 border-transparent hover:border-[#DA7756]/30"
+                          disabled={selecting}
+                          whileHover={selecting ? {} : { scale: 1.02 }}
+                          whileTap={selecting ? {} : { scale: 0.98 }}
+                          className={`p-4 bg-[#F5F3F0] dark:bg-[#2E2E2E] rounded-xl text-left transition-colors group border-2 border-transparent ${
+                            selecting
+                              ? 'opacity-50 cursor-not-allowed'
+                              : 'hover:bg-[#EBE8E4] dark:hover:bg-[#393939] hover:border-[#DA7756]/30'
+                          }`}
                         >
                           <div className="flex items-start gap-3">
                             <div

@@ -1,12 +1,12 @@
-// Folder commands - unified folder tree implementation
+// Folder commands - unified folder tree implementation with encrypted metadata
 
 use std::fs;
 use std::path::PathBuf;
 use tauri::State;
 
-
-use crate::storage::{StorageState, foldersDir, parseFilename, toFilename, slugify, parseFrontmatter, toMarkdown};
-use crate::models::{Folder, FolderFrontmatter};
+use crate::storage::{StorageState, foldersDir, isValidUuidDir, trashNotesDir, trashTasksDir, trashPasswordsDir};
+use crate::encrypted_storage;
+use crate::models::{Folder, FolderFrontmatter, TaskStatus};
 use super::common::newId;
 
 #[derive(serde::Serialize)]
@@ -14,7 +14,6 @@ pub struct FolderInfo {
     pub id: String,
     pub name: String,
     pub rank: u32,
-    pub slug: String,
     pub pinned: bool,
     pub favorite: bool,
     pub color: String,
@@ -27,14 +26,13 @@ pub struct FolderInfo {
 impl From<&Folder> for FolderInfo {
     fn from(f: &Folder) -> Self {
         Self {
-            id: f.id(),
-            name: f.name(),
-            rank: f.rank,
-            slug: f.slug.clone(),
-            pinned: f.frontmatter.as_ref().map(|fm| fm.pinned).unwrap_or(false),
-            favorite: f.frontmatter.as_ref().map(|fm| fm.favorite).unwrap_or(false),
-            color: f.frontmatter.as_ref().map(|fm| fm.color.clone()).unwrap_or_else(|| "#6B7280".to_string()),
-            icon: f.frontmatter.as_ref().map(|fm| fm.icon.clone()).unwrap_or_default(),
+            id: f.frontmatter.id.clone(),
+            name: f.frontmatter.name.clone(),
+            rank: f.frontmatter.rank,
+            pinned: f.frontmatter.pinned,
+            favorite: f.frontmatter.favorite,
+            color: f.frontmatter.color.clone(),
+            icon: f.frontmatter.icon.clone(),
             path: f.path.to_string_lossy().to_string(),
             parentPath: f.parentPath.as_ref().map(|p| p.to_string_lossy().to_string()),
             children: f.children.iter().map(FolderInfo::from).collect(),
@@ -42,10 +40,10 @@ impl From<&Folder> for FolderInfo {
     }
 }
 
-/// Scan folders recursively from a directory
-pub(crate) fn scanFolders(baseDir: &PathBuf, parentPath: Option<PathBuf>) -> Vec<Folder> {
+/// Scan folders recursively from a directory using encrypted format
+pub(crate) fn scanFolders(baseDir: &PathBuf, parentPath: Option<PathBuf>, masterPassword: Option<&str>) -> Vec<Folder> {
     let mut folders = Vec::new();
-    
+
     if !baseDir.exists() {
         return folders;
     }
@@ -59,45 +57,60 @@ pub(crate) fn scanFolders(baseDir: &PathBuf, parentPath: Option<PathBuf>) -> Vec
 
     for entry in entries {
         let path = entry.path();
-        let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        
-        // Skip hidden folders, status folders, and notes/tasks subdirs
-        if filename.starts_with('.') || 
-           ["todo", "doing", "done", "archived", "notes", "tasks"].contains(&filename.to_lowercase().as_str()) {
+        let dirname = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+        // Skip hidden folders, status folders, and special subdirs
+        if dirname.starts_with('.') ||
+           ["todo", "doing", "done", "notes", "tasks", "passwords"].contains(&dirname.to_lowercase().as_str()) {
             continue;
         }
 
-        if let Some((rank, slug)) = parseFilename(filename) {
-            // Try to load .folder.md for metadata
+        // Validate directory name is a UUID
+        if isValidUuidDir(dirname) {
+            // Require .folder.md to exist - folders without metadata are skipped
             let folderMdPath = path.join(".folder.md");
-            let frontmatter = if folderMdPath.exists() {
-                fs::read_to_string(&folderMdPath)
-                    .ok()
-                    .and_then(|content| parseFrontmatter::<FolderFrontmatter>(&content).map(|(fm, _)| fm))
-            } else {
-                None
-            };
+            if folderMdPath.exists() {
+                if let Ok(content) = fs::read_to_string(&folderMdPath) {
+                    // Check if file is encrypted
+                    let frontmatter = if encrypted_storage::isEncryptedFormat(&content) {
+                        // Need master password to decrypt
+                        if let Some(password) = masterPassword {
+                            encrypted_storage::parseEncryptedFile(&content)
+                                .ok()
+                                .and_then(|encrypted| {
+                                    encrypted_storage::decryptMetadata(&encrypted.metadata, password)
+                                        .ok()
+                                        .and_then(|yaml| serde_yaml::from_str::<FolderFrontmatter>(&yaml).ok())
+                                })
+                        } else {
+                            None
+                        }
+                    } else {
+                        None // Skip unencrypted files - we no longer support legacy format
+                    };
 
-            let children = scanFolders(&path, Some(path.clone()));
+                    if let Some(fm) = frontmatter {
+                        let children = scanFolders(&path, Some(path.clone()), masterPassword);
 
-            folders.push(Folder {
-                rank,
-                slug,
-                path: path.clone(),
-                parentPath: parentPath.clone(),
-                frontmatter,
-                children,
-            });
+                        folders.push(Folder {
+                            path: path.clone(),
+                            parentPath: parentPath.clone(),
+                            frontmatter: fm,
+                            children,
+                        });
+                    }
+                }
+            }
         }
     }
 
-    // Sort by rank
-    folders.sort_by_key(|f| f.rank);
+    // Sort by rank stored in frontmatter
+    folders.sort_by_key(|f| f.frontmatter.rank);
     folders
 }
 
 #[tauri::command]
-pub fn getFolders(storage: State<'_, StorageState>) -> Vec<FolderInfo> {
+pub fn getFolders(storage: State<'_, StorageState>) -> Result<Vec<FolderInfo>, String> {
     println!("[getFolders] Called");
 
     let wsPath = match storage.getWorkspacePath() {
@@ -107,21 +120,31 @@ pub fn getFolders(storage: State<'_, StorageState>) -> Vec<FolderInfo> {
         },
         None => {
             println!("[getFolders] No workspace path, returning empty");
-            return Vec::new();
+            return Ok(Vec::new());
         }
     };
+
+    // Check if vault is unlocked
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword();
+    let passwordRef = masterPassword.as_deref();
 
     let baseDir = foldersDir(&wsPath);
     println!("[getFolders] Scanning directory: {:?}", baseDir);
 
-    let folders = scanFolders(&baseDir, None);
+    let folders = scanFolders(&baseDir, None, passwordRef);
     println!("[getFolders] Found {} folders", folders.len());
+
+    storage.updateActivity();
 
     let result: Vec<FolderInfo> = folders.iter().map(FolderInfo::from).collect();
     for f in &result {
         println!("[getFolders]   - {} (path: {})", f.name, f.path);
     }
-    result
+    Ok(result)
 }
 
 #[derive(serde::Deserialize)]
@@ -136,6 +159,13 @@ pub fn createFolder(storage: State<'_, StorageState>, input: CreateFolderInput) 
              input.name, input.parentPath);
 
     let wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
+
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword().ok_or("No master password")?;
+
     println!("[createFolder] Workspace path: {}", wsPath);
 
     let baseDir = foldersDir(&wsPath);
@@ -147,14 +177,14 @@ pub fn createFolder(storage: State<'_, StorageState>, input: CreateFolderInput) 
         .unwrap_or(baseDir.clone());
     println!("[createFolder] Parent directory: {:?}", parentDir);
 
-    // Find next rank
-    let existingFolders = scanFolders(&parentDir, None);
-    let nextRank = existingFolders.iter().map(|f| f.rank).max().unwrap_or(0) + 1;
+    // Find next rank from existing folders
+    let existingFolders = scanFolders(&parentDir, None, Some(&masterPassword));
+    let nextRank = existingFolders.iter().map(|f| f.frontmatter.rank).max().unwrap_or(0) + 1;
     println!("[createFolder] Next rank: {}", nextRank);
 
-    let slug = slugify(&input.name);
-    let folderName = toFilename(nextRank, &slug, true);
-    let folderPath = parentDir.join(&folderName);
+    // UUID is the directory name (no extension for directories)
+    let id = newId();
+    let folderPath = parentDir.join(&id);
     println!("[createFolder] Creating folder at: {:?}", folderPath);
 
     // Create folder
@@ -164,32 +194,37 @@ pub fn createFolder(storage: State<'_, StorageState>, input: CreateFolderInput) 
     })?;
     println!("[createFolder] Directory created successfully");
 
-    // Create .folder.md with metadata
-    let id = newId();
-    let fm = FolderFrontmatter::new(id.clone(), input.name.clone());
-    let content = toMarkdown(&fm, "")?;
-    fs::write(folderPath.join(".folder.md"), content).map_err(|e| {
+    // Create .folder.md with encrypted metadata (folders have no body content)
+    let fm = FolderFrontmatter::new(id.clone(), input.name.clone(), nextRank);
+    let fileContent = encrypted_storage::createEncryptedFile(
+        &serde_yaml::to_string(&fm).map_err(|e| e.to_string())?,
+        "", // Folders have no body content
+        &masterPassword,
+    )?;
+
+    fs::write(folderPath.join(".folder.md"), fileContent).map_err(|e| {
         println!("[createFolder] ERROR writing .folder.md: {}", e);
         e.to_string()
     })?;
     println!("[createFolder] .folder.md created with id: {}", id);
 
-    // Create notes/ and tasks/ subdirectories inside the folder
+    // Create notes/, tasks/, and passwords/ subdirectories inside the folder
     fs::create_dir_all(folderPath.join("notes")).map_err(|e| e.to_string())?;
     fs::create_dir_all(folderPath.join("tasks")).map_err(|e| e.to_string())?;
+    fs::create_dir_all(folderPath.join("passwords")).map_err(|e| e.to_string())?;
     // Create task status folders
-    for status in ["todo", "doing", "done", "archived"] {
+    for status in ["todo", "doing", "done"] {
         fs::create_dir_all(folderPath.join("tasks").join(status)).map_err(|e| e.to_string())?;
     }
 
     let folder = Folder {
-        rank: nextRank,
-        slug,
         path: folderPath.clone(),
         parentPath: Some(parentDir),
-        frontmatter: Some(fm),
+        frontmatter: fm,
         children: Vec::new(),
     };
+
+    storage.updateActivity();
 
     let result = FolderInfo::from(&folder);
     println!("[createFolder] SUCCESS - created folder id: {}, path: {}", result.id, result.path);
@@ -207,28 +242,35 @@ pub struct UpdateFolderInput {
 }
 
 #[tauri::command]
-pub fn updateFolder(_storage: State<'_, StorageState>, input: UpdateFolderInput) -> Result<(), String> {
+pub fn updateFolder(storage: State<'_, StorageState>, input: UpdateFolderInput) -> Result<(), String> {
     println!("[updateFolder] Called with path: {}", input.path);
     println!("[updateFolder] Updates - name: {:?}, pinned: {:?}, color: {:?}",
              input.name, input.pinned, input.color);
+
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword().ok_or("No master password")?;
 
     let folderPath = PathBuf::from(&input.path);
     let folderMdPath = folderPath.join(".folder.md");
     println!("[updateFolder] Looking for .folder.md at: {:?}", folderMdPath);
 
-    // Load existing frontmatter or create new
-    let mut fm = if folderMdPath.exists() {
-        println!("[updateFolder] Found existing .folder.md");
-        fs::read_to_string(&folderMdPath)
-            .ok()
-            .and_then(|content| parseFrontmatter::<FolderFrontmatter>(&content).map(|(fm, _)| fm))
-            .unwrap_or_else(|| {
-                println!("[updateFolder] Failed to parse frontmatter, creating new");
-                FolderFrontmatter::new(newId(), "".to_string())
-            })
+    if !folderMdPath.exists() {
+        return Err("Folder metadata (.folder.md) not found".to_string());
+    }
+
+    // Load and decrypt existing frontmatter
+    let content = fs::read_to_string(&folderMdPath).map_err(|e| e.to_string())?;
+
+    let mut fm = if encrypted_storage::isEncryptedFormat(&content) {
+        let encrypted = encrypted_storage::parseEncryptedFile(&content)?;
+        let yamlContent = encrypted_storage::decryptMetadata(&encrypted.metadata, &masterPassword)?;
+        serde_yaml::from_str::<FolderFrontmatter>(&yamlContent)
+            .map_err(|e| format!("Failed to parse folder metadata: {}", e))?
     } else {
-        println!("[updateFolder] No .folder.md found, creating new");
-        FolderFrontmatter::new(newId(), "".to_string())
+        return Err("Folder metadata is not encrypted".to_string());
     };
 
     // Update fields
@@ -253,32 +295,136 @@ pub fn updateFolder(_storage: State<'_, StorageState>, input: UpdateFolderInput)
         fm.icon = icon;
     }
 
-    // Save
-    let content = toMarkdown(&fm, "")?;
-    fs::write(&folderMdPath, content).map_err(|e| {
+    // Save with encryption
+    let fileContent = encrypted_storage::createEncryptedFile(
+        &serde_yaml::to_string(&fm).map_err(|e| e.to_string())?,
+        "", // Folders have no body content
+        &masterPassword,
+    )?;
+
+    fs::write(&folderMdPath, fileContent).map_err(|e| {
         println!("[updateFolder] ERROR writing file: {}", e);
         e.to_string()
     })?;
 
+    storage.updateActivity();
     println!("[updateFolder] SUCCESS");
     Ok(())
 }
 
+/// Recursively move all items (notes, tasks, passwords) from a folder to trash
+fn moveAllItemsToTrash(folderPath: &PathBuf, wsPath: &str) -> Result<(), String> {
+    // Move notes from this folder's notes/ directory
+    let notesPath = folderPath.join("notes");
+    if notesPath.exists() {
+        let trashNotes = trashNotesDir(wsPath);
+        fs::create_dir_all(&trashNotes).map_err(|e| e.to_string())?;
+
+        if let Ok(entries) = fs::read_dir(&notesPath) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && path.extension().map_or(false, |e| e == "md") {
+                    if let Some(filename) = path.file_name() {
+                        let trashPath = trashNotes.join(filename);
+                        let _ = fs::rename(&path, &trashPath);
+                    }
+                }
+            }
+        }
+    }
+
+    // Move tasks from this folder's tasks/{status}/ directories
+    let tasksPath = folderPath.join("tasks");
+    if tasksPath.exists() {
+        let trashTasks = trashTasksDir(wsPath);
+
+        for status in [TaskStatus::Todo, TaskStatus::Doing, TaskStatus::Done] {
+            let statusPath = tasksPath.join(status.folderName());
+            if statusPath.exists() {
+                let trashStatusPath = trashTasks.join(status.folderName());
+                fs::create_dir_all(&trashStatusPath).map_err(|e| e.to_string())?;
+
+                if let Ok(entries) = fs::read_dir(&statusPath) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_file() && path.extension().map_or(false, |e| e == "md") {
+                            if let Some(filename) = path.file_name() {
+                                let trashPath = trashStatusPath.join(filename);
+                                let _ = fs::rename(&path, &trashPath);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Move passwords from this folder's passwords/ directory
+    let passwordsPath = folderPath.join("passwords");
+    if passwordsPath.exists() {
+        let trashPasswords = trashPasswordsDir(wsPath);
+        fs::create_dir_all(&trashPasswords).map_err(|e| e.to_string())?;
+
+        if let Ok(entries) = fs::read_dir(&passwordsPath) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && path.extension().map_or(false, |e| e == "md") {
+                    if let Some(filename) = path.file_name() {
+                        let trashPath = trashPasswords.join(filename);
+                        let _ = fs::rename(&path, &trashPath);
+                    }
+                }
+            }
+        }
+    }
+
+    // Recursively process subfolders (UUID directories with .folder.md)
+    if let Ok(entries) = fs::read_dir(folderPath) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let dirname = path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("");
+
+                // Check if it's a subfolder (has .folder.md)
+                if isValidUuidDir(dirname) && path.join(".folder.md").exists() {
+                    moveAllItemsToTrash(&path, wsPath)?;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
-pub fn deleteFolder(_storage: State<'_, StorageState>, path: String) -> Result<(), String> {
-    println!("[deleteFolder] Called with path: {}", path);
+pub fn deleteFolder(storage: State<'_, StorageState>, path: String, permanent: Option<bool>) -> Result<(), String> {
+    println!("[deleteFolder] Called with path: {}, permanent: {:?}", path, permanent);
+
+    let wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
 
     let folderPath = PathBuf::from(&path);
-    if folderPath.exists() {
-        println!("[deleteFolder] Folder exists, deleting...");
-        fs::remove_dir_all(&folderPath).map_err(|e| {
-            println!("[deleteFolder] ERROR: {}", e);
-            e.to_string()
-        })?;
-        println!("[deleteFolder] SUCCESS - folder deleted");
-    } else {
+    if !folderPath.exists() {
         println!("[deleteFolder] Folder does not exist at path");
+        return Ok(());
     }
+
+    if !permanent.unwrap_or(false) {
+        // Soft delete: move all items to trash first
+        println!("[deleteFolder] Moving all items to trash...");
+        moveAllItemsToTrash(&folderPath, &wsPath)?;
+        println!("[deleteFolder] All items moved to trash");
+    }
+
+    // Always delete the folder structure itself (it's now empty or we want permanent delete)
+    println!("[deleteFolder] Deleting folder structure...");
+    fs::remove_dir_all(&folderPath).map_err(|e| {
+        println!("[deleteFolder] ERROR: {}", e);
+        e.to_string()
+    })?;
+    println!("[deleteFolder] SUCCESS - folder deleted");
+
     Ok(())
 }
 
@@ -289,31 +435,59 @@ pub struct ReorderFoldersInput {
 }
 
 #[tauri::command]
-pub fn reorderFolders(_storage: State<'_, StorageState>, input: ReorderFoldersInput) -> Result<(), String> {
+pub fn reorderFolders(storage: State<'_, StorageState>, input: ReorderFoldersInput) -> Result<(), String> {
     println!("[reorderFolders] Called with parentPath: {:?}", input.parentPath);
     println!("[reorderFolders] Folder paths to reorder: {:?}", input.folderPaths);
 
-    // Reorder by renaming with new rank prefixes
-    for (index, oldPath) in input.folderPaths.iter().enumerate() {
-        let oldPathBuf = PathBuf::from(oldPath);
-        let parent = oldPathBuf.parent().ok_or("No parent")?;
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
 
-        // Get current slug from filename
-        let filename = oldPathBuf.file_name().and_then(|n| n.to_str()).ok_or("No filename")?;
-        let (_, slug) = parseFilename(filename).ok_or("Invalid filename")?;
+    let masterPassword = storage.getMasterPassword().ok_or("No master password")?;
+
+    // Update rank in .folder.md
+    for (index, folderPath) in input.folderPaths.iter().enumerate() {
+        let pathBuf = PathBuf::from(folderPath);
+        let folderMdPath = pathBuf.join(".folder.md");
+
+        if !folderMdPath.exists() {
+            println!("[reorderFolders] WARNING: .folder.md not found for {}", folderPath);
+            continue;
+        }
+
+        // Load and decrypt frontmatter
+        let content = fs::read_to_string(&folderMdPath).map_err(|e| e.to_string())?;
+
+        let mut fm = if encrypted_storage::isEncryptedFormat(&content) {
+            let encrypted = encrypted_storage::parseEncryptedFile(&content)?;
+            let yamlContent = encrypted_storage::decryptMetadata(&encrypted.metadata, &masterPassword)?;
+            serde_yaml::from_str::<FolderFrontmatter>(&yamlContent)
+                .map_err(|e| format!("Failed to parse folder metadata: {}", e))?
+        } else {
+            continue; // Skip unencrypted files
+        };
 
         let newRank = (index + 1) as u32;
-        let newName = toFilename(newRank, &slug, true);
-        let newPath = parent.join(&newName);
 
-        if oldPathBuf != newPath {
-            println!("[reorderFolders] Renaming {} -> {}", oldPath, newPath.display());
-            fs::rename(&oldPathBuf, &newPath).map_err(|e| {
+        // Only update if rank changed
+        if fm.rank != newRank {
+            println!("[reorderFolders] Updating rank for {} from {} to {}", folderPath, fm.rank, newRank);
+            fm.rank = newRank;
+
+            let fileContent = encrypted_storage::createEncryptedFile(
+                &serde_yaml::to_string(&fm).map_err(|e| e.to_string())?,
+                "",
+                &masterPassword,
+            )?;
+
+            fs::write(&folderMdPath, fileContent).map_err(|e| {
                 println!("[reorderFolders] ERROR: {}", e);
                 e.to_string()
             })?;
         }
     }
+
+    storage.updateActivity();
     println!("[reorderFolders] SUCCESS");
     Ok(())
 }
@@ -330,6 +504,13 @@ pub fn moveFolder(storage: State<'_, StorageState>, input: MoveFolderInput) -> R
              input.folderPath, input.newParentPath);
 
     let wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
+
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword().ok_or("No master password")?;
+
     let baseDir = foldersDir(&wsPath);
 
     let oldPath = PathBuf::from(&input.folderPath);
@@ -339,7 +520,8 @@ pub fn moveFolder(storage: State<'_, StorageState>, input: MoveFolderInput) -> R
 
     // Determine new parent directory
     let newParentDir = input.newParentPath
-        .map(PathBuf::from)
+        .as_ref()
+        .map(|p| PathBuf::from(p))
         .unwrap_or(baseDir.clone());
 
     // Prevent moving folder into itself or its children
@@ -347,23 +529,47 @@ pub fn moveFolder(storage: State<'_, StorageState>, input: MoveFolderInput) -> R
         return Err("Cannot move folder into itself".to_string());
     }
 
-    // Check if already in the target parent
-    let currentParent = oldPath.parent().ok_or("No parent")?;
-    if currentParent == newParentDir {
-        return Err("Folder is already in this location".to_string());
+    // Get folder UUID (directory name)
+    let dirname = oldPath.file_name().and_then(|n| n.to_str()).ok_or("No directory name")?;
+    if !isValidUuidDir(dirname) {
+        return Err("Invalid folder: directory name is not a valid UUID".to_string());
     }
 
-    // Get folder slug from current path
-    let filename = oldPath.file_name().and_then(|n| n.to_str()).ok_or("No filename")?;
-    let (_, slug) = parseFilename(filename).ok_or("Invalid folder name")?;
+    // Check if already in the target parent (same parent, no move needed)
+    let currentParent = oldPath.parent().ok_or("No parent")?;
+    let isSameParent = currentParent == newParentDir;
+
+    if isSameParent {
+        // Same parent - just return current folder info without moving
+        println!("[moveFolder] Folder already in target location, returning current state");
+        let folderMdPath = oldPath.join(".folder.md");
+
+        let content = fs::read_to_string(&folderMdPath).map_err(|e| e.to_string())?;
+        let fm = if encrypted_storage::isEncryptedFormat(&content) {
+            let encrypted = encrypted_storage::parseEncryptedFile(&content)?;
+            let yamlContent = encrypted_storage::decryptMetadata(&encrypted.metadata, &masterPassword)?;
+            serde_yaml::from_str::<FolderFrontmatter>(&yamlContent)
+                .map_err(|e| format!("Failed to parse folder metadata: {}", e))?
+        } else {
+            return Err("Folder metadata is not encrypted".to_string());
+        };
+
+        let children = scanFolders(&oldPath, Some(oldPath.clone()), Some(&masterPassword));
+        let folder = Folder {
+            path: oldPath,
+            parentPath: Some(newParentDir),
+            frontmatter: fm,
+            children,
+        };
+        return Ok(FolderInfo::from(&folder));
+    }
 
     // Find next rank in new parent
-    let existingFolders = scanFolders(&newParentDir, None);
-    let nextRank = existingFolders.iter().map(|f| f.rank).max().unwrap_or(0) + 1;
+    let existingFolders = scanFolders(&newParentDir, None, Some(&masterPassword));
+    let nextRank = existingFolders.iter().map(|f| f.frontmatter.rank).max().unwrap_or(0) + 1;
 
-    // Create new path
-    let newFolderName = toFilename(nextRank, &slug, true);
-    let newPath = newParentDir.join(&newFolderName);
+    // Same UUID directory name, new parent location
+    let newPath = newParentDir.join(dirname);
 
     println!("[moveFolder] Moving from {:?} to {:?}", oldPath, newPath);
 
@@ -373,29 +579,39 @@ pub fn moveFolder(storage: State<'_, StorageState>, input: MoveFolderInput) -> R
         e.to_string()
     })?;
 
-    // Load the moved folder info
+    // Update rank in .folder.md
     let folderMdPath = newPath.join(".folder.md");
-    let frontmatter = if folderMdPath.exists() {
-        fs::read_to_string(&folderMdPath)
-            .ok()
-            .and_then(|content| parseFrontmatter::<FolderFrontmatter>(&content).map(|(fm, _)| fm))
+    let content = fs::read_to_string(&folderMdPath).map_err(|e| e.to_string())?;
+
+    let mut fm = if encrypted_storage::isEncryptedFormat(&content) {
+        let encrypted = encrypted_storage::parseEncryptedFile(&content)?;
+        let yamlContent = encrypted_storage::decryptMetadata(&encrypted.metadata, &masterPassword)?;
+        serde_yaml::from_str::<FolderFrontmatter>(&yamlContent)
+            .map_err(|e| format!("Failed to parse folder metadata: {}", e))?
     } else {
-        None
+        return Err("Folder metadata is not encrypted".to_string());
     };
 
-    let children = scanFolders(&newPath, Some(newPath.clone()));
+    fm.rank = nextRank;
+
+    let fileContent = encrypted_storage::createEncryptedFile(
+        &serde_yaml::to_string(&fm).map_err(|e| e.to_string())?,
+        "",
+        &masterPassword,
+    )?;
+
+    fs::write(&folderMdPath, fileContent).map_err(|e| e.to_string())?;
+
+    let children = scanFolders(&newPath, Some(newPath.clone()), Some(&masterPassword));
 
     let folder = Folder {
-        rank: nextRank,
-        slug,
         path: newPath,
         parentPath: Some(newParentDir),
-        frontmatter,
+        frontmatter: fm,
         children,
     };
 
+    storage.updateActivity();
     println!("[moveFolder] SUCCESS");
     Ok(FolderInfo::from(&folder))
 }
-
-

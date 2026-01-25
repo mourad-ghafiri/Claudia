@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import type { NoteInfo, CreateNoteInput, UpdateNoteInput, Note, FloatWindow } from '../types';
+import type { NoteInfo, CreateNoteInput, UpdateNoteInput, Note, FloatWindow, TrashNoteInfo } from '../types';
 import { toNote } from '../types';
+import { useTrashStore } from './trashStore';
 
 // Content cache for notes with LRU eviction to prevent memory leaks
 const MAX_CONTENT_CACHE_SIZE = 100;
@@ -30,10 +31,11 @@ interface NoteState {
     // Actions
     fetchNotes: () => Promise<void>;
     fetchNotesByFolder: (folderPath: string) => Promise<void>;
+    fetchTrashNotes: () => Promise<void>;
     getNoteContent: (id: string) => Promise<string>;
     createNote: (input: CreateNoteInput) => Promise<Note>;
     updateNote: (input: UpdateNoteInput & { isVisible?: boolean }) => Promise<void>;
-    deleteNote: (id: string) => Promise<void>;
+    deleteNote: (id: string, permanent?: boolean) => Promise<void>;
     selectNote: (id: string | null) => void;
     reorderNotes: (folderPath: string, noteIds: string[]) => Promise<void>;
 
@@ -75,6 +77,35 @@ export const useNoteStore = create<NoteState>((set, get) => ({
                 const cachedContent = contentCache.get(info.id) || '';
                 return toNote(info, cachedContent);
             });
+            set({ notes, loading: false });
+        } catch (error) {
+            set({ error: String(error), loading: false });
+        }
+    },
+
+    fetchTrashNotes: async () => {
+        set({ loading: true, error: null });
+        try {
+            const trashNotes = await invoke<TrashNoteInfo[]>('listTrashNotes');
+            // Convert TrashNoteInfo to Note format
+            const notes: Note[] = trashNotes.map((info) => ({
+                id: info.id,
+                title: info.title,
+                rank: 0,
+                color: info.color,
+                pinned: info.pinned,
+                tags: info.tags,
+                created: info.created,
+                updated: info.updated,
+                folderPath: '.trash',
+                path: info.path,
+                content: contentCache.get(info.id) || '',
+                isVisible: false,
+                windowX: 250,
+                windowY: 200,
+                windowWidth: 400,
+                windowHeight: 300,
+            }));
             set({ notes, loading: false });
         } catch (error) {
             set({ error: String(error), loading: false });
@@ -164,13 +195,15 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         }));
     },
 
-    deleteNote: async (id: string) => {
-        await invoke('deleteNote', { id });
+    deleteNote: async (id: string, permanent?: boolean) => {
+        await invoke('deleteNote', { id, permanent: permanent ?? false });
         contentCache.delete(id);
         set(state => ({
             notes: state.notes.filter(n => n.id !== id),
             selectedNoteId: state.selectedNoteId === id ? null : state.selectedNoteId,
         }));
+        // Refresh trash counts
+        useTrashStore.getState().fetchTrashCounts();
     },
 
     selectNote: (id: string | null) => {
@@ -224,7 +257,11 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
     moveNoteToFolder: async (id: string, targetFolderPath: string) => {
         await invoke('moveNoteToFolder', { id, targetFolderPath });
-        // Refetch all notes to ensure consistency (path, rank, etc. all change on backend)
-        await get().fetchNotes();
+        // Remove from local state immediately (works for both regular and trash items)
+        set(state => ({
+            notes: state.notes.filter(n => n.id !== id),
+        }));
+        // Refresh trash counts (in case item was moved from/to trash)
+        useTrashStore.getState().fetchTrashCounts();
     },
 }));

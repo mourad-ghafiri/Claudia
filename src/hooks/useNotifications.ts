@@ -93,9 +93,9 @@ export function useNotifications() {
     const upcomingTasks = tasks.filter((task: Task) => {
       // Only consider tasks that:
       // 1. Have a due date
-      // 2. Are not done or archived
+      // 2. Are not done
       // 3. Haven't been notified yet
-      if (!task.due || task.status === 'done' || task.status === 'archived') {
+      if (!task.due || task.status === 'done') {
         return false;
       }
 

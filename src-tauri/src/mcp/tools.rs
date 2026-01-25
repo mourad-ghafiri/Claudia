@@ -185,7 +185,8 @@ impl ClaudiaServer {
     
     #[tool(description = "List all notes, optionally filtered by folder")]
     async fn list_notes(&self, input: Parameters<FolderPathInput>) -> Result<CallToolResult, McpError> {
-        let notes = api::get_notes(&self.storage, input.0.folder_path.as_deref());
+        let notes = api::get_notes(&self.storage, input.0.folder_path.as_deref())
+            .map_err(|e| McpError::internal_error(e, None))?;
         let json = serde_json::to_string_pretty(&notes).unwrap_or_else(|_| "[]".to_string());
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -193,8 +194,11 @@ impl ClaudiaServer {
     #[tool(description = "Get a specific note by ID, including its content")]
     async fn get_note(&self, input: Parameters<IdInput>) -> Result<CallToolResult, McpError> {
         let note = api::get_note_by_id(&self.storage, &input.0.id)
+            .map_err(|e| McpError::internal_error(e, None))?
             .ok_or_else(|| McpError::invalid_params(format!("Note not found: {}", input.0.id), None))?;
-        let content = api::get_note_content(&self.storage, &input.0.id).unwrap_or_default();
+        let content = api::get_note_content(&self.storage, &input.0.id)
+            .map_err(|e| McpError::internal_error(e, None))?
+            .unwrap_or_default();
         let result = serde_json::json!({ "note": note, "content": content });
         Ok(CallToolResult::success(vec![Content::text(serde_json::to_string_pretty(&result).unwrap())]))
     }
@@ -239,7 +243,8 @@ impl ClaudiaServer {
 
     #[tool(description = "Search notes by title or content")]
     async fn search_notes(&self, input: Parameters<SearchInput>) -> Result<CallToolResult, McpError> {
-        let notes = api::search_notes(&self.storage, &input.0.query);
+        let notes = api::search_notes(&self.storage, &input.0.query)
+            .map_err(|e| McpError::internal_error(e, None))?;
         let json = serde_json::to_string_pretty(&notes).unwrap_or_else(|_| "[]".to_string());
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -256,7 +261,8 @@ impl ClaudiaServer {
 
     #[tool(description = "List all tasks, optionally filtered by folder or status")]
     async fn list_tasks(&self, input: Parameters<TasksFilterInput>) -> Result<CallToolResult, McpError> {
-        let tasks = api::get_tasks(&self.storage, input.0.folder_path.as_deref(), input.0.status.as_deref());
+        let tasks = api::get_tasks(&self.storage, input.0.folder_path.as_deref(), input.0.status.as_deref())
+            .map_err(|e| McpError::internal_error(e, None))?;
         let json = serde_json::to_string_pretty(&tasks).unwrap_or_else(|_| "[]".to_string());
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -264,8 +270,10 @@ impl ClaudiaServer {
     #[tool(description = "Get a specific task by ID")]
     async fn get_task(&self, input: Parameters<IdInput>) -> Result<CallToolResult, McpError> {
         let task = api::get_task_by_id(&self.storage, &input.0.id)
+            .map_err(|e| McpError::internal_error(e, None))?
             .ok_or_else(|| McpError::invalid_params(format!("Task not found: {}", input.0.id), None))?;
-        let content = api::get_task_content(&self.storage, &input.0.id).unwrap_or_default();
+        let content = api::get_task_content(&self.storage, &input.0.id)
+            .map_err(|e| McpError::internal_error(e, None))?;
         let result = serde_json::json!({ "task": task, "content": content });
         Ok(CallToolResult::success(vec![Content::text(serde_json::to_string_pretty(&result).unwrap())]))
     }
@@ -334,7 +342,8 @@ impl ClaudiaServer {
 
     #[tool(description = "List all folders in the workspace")]
     async fn list_folders(&self) -> Result<CallToolResult, McpError> {
-        let folders = api::get_folders(&self.storage);
+        let folders = api::get_folders(&self.storage)
+            .map_err(|e| McpError::internal_error(e, None))?;
         let json = serde_json::to_string_pretty(&folders).unwrap_or_else(|_| "[]".to_string());
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -363,6 +372,7 @@ impl ClaudiaServer {
     #[tool(description = "Show a note in a floating window")]
     async fn show_note(&self, input: Parameters<IdInput>) -> Result<CallToolResult, McpError> {
         let note = api::get_note_by_id(&self.storage, &input.0.id)
+            .map_err(|e| McpError::internal_error(e, None))?
             .ok_or_else(|| McpError::invalid_params(format!("Note not found: {}", input.0.id), None))?;
         
         let config = crate::commands::floating::FloatingWindowConfig {
@@ -393,6 +403,7 @@ impl ClaudiaServer {
     #[tool(description = "Show a task in a floating window")]
     async fn show_task(&self, input: Parameters<IdInput>) -> Result<CallToolResult, McpError> {
         let task = api::get_task_by_id(&self.storage, &input.0.id)
+            .map_err(|e| McpError::internal_error(e, None))?
             .ok_or_else(|| McpError::invalid_params(format!("Task not found: {}", input.0.id), None))?;
         
         let config = crate::commands::floating::FloatingWindowConfig {

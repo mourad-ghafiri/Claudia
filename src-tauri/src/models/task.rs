@@ -1,5 +1,5 @@
 // Task model for filesystem-based storage
-// UUID for stable ID, rank prefix for ordering, status from folder
+// UUID for stable ID and filename, rank in frontmatter for ordering, status from folder
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -8,8 +8,10 @@ use super::common::{FloatWindow, TaskStatus};
 /// Task frontmatter (YAML header in .md file)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskFrontmatter {
-    pub id: String,  // UUID - stable identifier
+    pub id: String,  // UUID - stable identifier (also used as filename)
     pub title: String,
+    #[serde(default)]
+    pub rank: u32,   // For ordering within status folder
     #[serde(default)]
     pub color: String,
     #[serde(default)]
@@ -25,11 +27,12 @@ pub struct TaskFrontmatter {
 }
 
 impl TaskFrontmatter {
-    pub fn new(id: String, title: String) -> Self {
+    pub fn new(id: String, title: String, rank: u32) -> Self {
         let now = chrono::Utc::now().timestamp_millis();
         Self {
             id,
             title,
+            rank,
             color: "#3B82F6".to_string(),
             pinned: false,
             tags: Vec::new(),
@@ -44,8 +47,6 @@ impl TaskFrontmatter {
 /// Full task with parsed data and filesystem info
 #[derive(Debug, Clone)]
 pub struct Task {
-    pub rank: u32,           // From filename prefix (e.g., 000001)
-    pub slug: String,        // From filename (e.g., "my-task")
     pub path: PathBuf,       // Full path to .md file
     pub folderPath: PathBuf, // Parent folder (project folder, not status)
     pub status: TaskStatus,  // Derived from parent folder name

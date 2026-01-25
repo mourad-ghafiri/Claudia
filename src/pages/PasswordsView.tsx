@@ -5,6 +5,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import { usePasswordStore } from '../stores/passwordStore';
 import { useFolderStore } from '../stores/folderStore';
 import { useUIStore } from '../stores/uiStore';
+import { useVaultStore } from '../stores/vaultStore';
 import { FolderSidebar } from '../components/layout/FolderSidebar';
 import { Button } from '../components/ui/Button';
 import type { PasswordInfo, FolderInfo, DecryptedPasswordContent } from '../types';
@@ -18,6 +19,7 @@ import {
     closestCorners,
     DragEndEvent,
     DragStartEvent,
+    MeasuringStrategy,
 } from '@dnd-kit/core';
 import {
     arrayMove,
@@ -60,32 +62,83 @@ export function PasswordsView() {
     const {
         passwords,
         fetchPasswords,
-        isUnlocked,
-        isMasterPasswordSet,
-        unlock,
-        setMasterPassword,
         getDecryptedContent,
         getDecryptedContentsBatch,
         getCachedContent,
         updatePassword,
         reorderPasswords,
         movePasswordToFolder,
+        fetchTrashPasswords,
     } = usePasswordStore();
-    const { currentFolderPath, setCurrentFolder, folders, reorderFolders } = useFolderStore();
-    const { openPasswordEditor, openDeleteConfirm, searchQuery } = useUIStore();
-
-    const [masterPasswordInput, setMasterPasswordInput] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
-    const [isSettingUp, setIsSettingUp] = useState(false);
-    const [unlockError, setUnlockError] = useState('');
+    const { currentFolderPath, setCurrentFolder, folders, moveFolder, getFolderById, reorderFolders } = useFolderStore();
+    const { openPasswordEditor, openDeleteConfirm, searchQuery, isTrashSelected } = useUIStore();
+    const {
+        isUnlocked,
+        isPasswordsAccessUnlocked,
+        passwordsError,
+        unlockPasswordsAccess,
+        checkPasswordsAccess,
+        updatePasswordsActivity,
+        clearPasswordsError
+    } = useVaultStore();
     const [draggedPassword, setDraggedPassword] = useState<PasswordInfo | null>(null);
+    const [draggedPasswordContent, setDraggedPasswordContent] = useState<DecryptedPasswordContent | null>(null);
     const [draggedFolder, setDraggedFolder] = useState<FolderInfo | null>(null);
+    const [unlockPassword, setUnlockPassword] = useState('');
+    const [isUnlocking, setIsUnlocking] = useState(false);
 
     // Batch fetch queue - collect IDs and fetch together
     const pendingFetchIds = useRef<Set<string>>(new Set());
     const fetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     // Force re-render when cache updates
     const [, forceUpdate] = useState(0);
+
+    // Check passwords access status periodically when viewing passwords
+    useEffect(() => {
+        checkPasswordsAccess();
+        const interval = setInterval(() => {
+            checkPasswordsAccess();
+        }, 30000); // Check every 30 seconds
+        return () => clearInterval(interval);
+    }, [checkPasswordsAccess]);
+
+    // Update passwords activity on user interaction
+    useEffect(() => {
+        if (!isPasswordsAccessUnlocked) return;
+
+        const handleActivity = () => {
+            updatePasswordsActivity();
+        };
+
+        // Add activity listeners
+        window.addEventListener('click', handleActivity);
+        window.addEventListener('keydown', handleActivity);
+
+        // Initial activity update
+        handleActivity();
+
+        return () => {
+            window.removeEventListener('click', handleActivity);
+            window.removeEventListener('keydown', handleActivity);
+        };
+    }, [isPasswordsAccessUnlocked, updatePasswordsActivity]);
+
+    // Handle unlock submission
+    const handleUnlock = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!unlockPassword.trim()) return;
+
+        setIsUnlocking(true);
+        try {
+            const success = await unlockPasswordsAccess(unlockPassword);
+            if (success) {
+                setUnlockPassword('');
+                toast.success('Passwords unlocked');
+            }
+        } finally {
+            setIsUnlocking(false);
+        }
+    };
 
     const sensors = useSensors(
         useSensor(PointerSensor, {
@@ -94,18 +147,40 @@ export function PasswordsView() {
     );
 
     useEffect(() => {
-        checkMasterPasswordStatus();
-    }, []);
-
-    useEffect(() => {
         if (isUnlocked) {
-            if (currentFolderPath) {
+            if (isTrashSelected) {
+                fetchTrashPasswords();
+            } else if (currentFolderPath) {
                 fetchPasswords(currentFolderPath);
             } else {
                 fetchPasswords();
             }
         }
-    }, [currentFolderPath, isUnlocked, fetchPasswords]);
+    }, [currentFolderPath, isUnlocked, fetchPasswords, fetchTrashPasswords, isTrashSelected]);
+
+    // Listen for trash events to refresh view
+    useEffect(() => {
+        const handleTrashEvent = () => {
+            if (!isUnlocked) return;
+            if (isTrashSelected) {
+                // Viewing trash - refetch trash items (will be empty after empty/restore)
+                fetchTrashPasswords();
+            } else {
+                // Not viewing trash - refetch regular passwords (restored items appear here)
+                if (currentFolderPath) {
+                    fetchPasswords(currentFolderPath);
+                } else {
+                    fetchPasswords();
+                }
+            }
+        };
+        window.addEventListener('trash-emptied', handleTrashEvent);
+        window.addEventListener('trash-restored', handleTrashEvent);
+        return () => {
+            window.removeEventListener('trash-emptied', handleTrashEvent);
+            window.removeEventListener('trash-restored', handleTrashEvent);
+        };
+    }, [isUnlocked, isTrashSelected, currentFolderPath, fetchPasswords, fetchTrashPasswords]);
 
     // Batch content request handler - collects IDs and fetches in batches
     const requestContent = useCallback((id: string) => {
@@ -131,52 +206,10 @@ export function PasswordsView() {
         }, 50); // 50ms debounce to collect multiple requests
     }, [getDecryptedContentsBatch]);
 
-    const checkMasterPasswordStatus = async () => {
-        const isSet = await isMasterPasswordSet();
-        setIsSettingUp(!isSet);
-    };
-
     const handleFolderChange = useCallback((folderPath: string | null) => {
         setCurrentFolder(folderPath);
-        if (isUnlocked) {
-            if (folderPath) {
-                fetchPasswords(folderPath);
-            } else {
-                fetchPasswords();
-            }
-        }
-    }, [setCurrentFolder, isUnlocked, fetchPasswords]);
-
-    const handleUnlock = async () => {
-        setUnlockError('');
-        const success = await unlock(masterPasswordInput);
-        if (success) {
-            setMasterPasswordInput('');
-            toast.success('Vault unlocked');
-        } else {
-            setUnlockError('Incorrect master password');
-        }
-    };
-
-    const handleSetupMasterPassword = async () => {
-        if (masterPasswordInput !== confirmPassword) {
-            setUnlockError('Passwords do not match');
-            return;
-        }
-        if (masterPasswordInput.length < 8) {
-            setUnlockError('Password must be at least 8 characters');
-            return;
-        }
-        try {
-            await setMasterPassword(masterPasswordInput);
-            setMasterPasswordInput('');
-            setConfirmPassword('');
-            setIsSettingUp(false);
-            toast.success('Master password set successfully');
-        } catch (e) {
-            setUnlockError(String(e));
-        }
-    };
+        // The fetch effect will handle fetching based on currentFolderPath change
+    }, [setCurrentFolder]);
 
     const copyToClipboard = useCallback(async (id: string) => {
         if (!isUnlocked) {
@@ -238,6 +271,7 @@ export function PasswordsView() {
         const password = passwords.find(p => p.id === activeId);
         if (password) {
             setDraggedPassword(password);
+            setDraggedPasswordContent(getCachedContent(activeId));
             setDraggedFolder(null);
             return;
         }
@@ -246,14 +280,22 @@ export function PasswordsView() {
         if (folder) {
             setDraggedFolder(folder);
             setDraggedPassword(null);
+            setDraggedPasswordContent(null);
             return;
         }
-    }, [passwords, folders]);
+    }, [passwords, folders, getCachedContent]);
+
+    const handleDragCancel = useCallback(() => {
+        setDraggedPassword(null);
+        setDraggedPasswordContent(null);
+        setDraggedFolder(null);
+    }, []);
 
     const handleDragEnd = useCallback(async (event: DragEndEvent) => {
         const { active, over } = event;
         const wasDraggingFolder = draggedFolder !== null;
         setDraggedPassword(null);
+        setDraggedPasswordContent(null);
         setDraggedFolder(null);
 
         if (!over) return;
@@ -261,24 +303,96 @@ export function PasswordsView() {
         const activeId = active.id as string;
         const overId = over.id as string;
 
-        // Handle folder reordering
+        // Handle folder movement
         if (wasDraggingFolder) {
-            // overId is in format "folder-{path}" from droppable
+            const activeFolder = getFolderById(activeId);
+            if (!activeFolder) return;
+
+            // Handle folder reordering (drop on indicator between folders)
+            if (typeof overId === 'string' && overId.startsWith('folder-reorder-')) {
+                // Parse: folder-reorder-{parentPath || 'root'}-{index}
+                const parts = overId.replace('folder-reorder-', '').split('-');
+                const targetIndex = parseInt(parts.pop() || '0', 10);
+                const parentPath = parts.join('-') === 'root' ? null : parts.join('-');
+
+                // Only reorder if same parent level
+                if (activeFolder.parentPath === parentPath) {
+                    // Get siblings at this level
+                    const siblings = parentPath === null
+                        ? folders.filter(f => !f.parentPath)
+                        : folders.find(f => f.path === parentPath)?.children || [];
+
+                    // Current index of the dragged folder
+                    const currentIndex = siblings.findIndex(f => f.path === activeFolder.path);
+                    if (currentIndex === -1) return;
+
+                    // Calculate new order
+                    const newOrder = [...siblings];
+                    newOrder.splice(currentIndex, 1);
+                    const insertAt = targetIndex > currentIndex ? targetIndex - 1 : targetIndex;
+                    newOrder.splice(insertAt, 0, activeFolder);
+
+                    const folderPaths = newOrder.map(f => f.path);
+                    try {
+                        await reorderFolders(parentPath, folderPaths);
+                    } catch (error) {
+                        toast.error('Failed to reorder folders');
+                    }
+                } else {
+                    // Moving to different parent - use moveFolder then reorder
+                    try {
+                        await moveFolder(activeFolder.path, parentPath);
+                        toast.success('Folder moved');
+                    } catch (error) {
+                        toast.error('Failed to move folder');
+                    }
+                }
+                return;
+            }
+
+            // Handle dropping folder to root level
+            if (overId === 'folder-root') {
+                // Only move if folder is not already at root level
+                if (activeFolder.parentPath) {
+                    try {
+                        await moveFolder(activeFolder.path, null);
+                        toast.success('Folder moved to root');
+                    } catch (error) {
+                        toast.error('Failed to move folder');
+                    }
+                }
+                return;
+            }
+
+            // Handle dropping folder onto another folder
             if (typeof overId === 'string' && overId.startsWith('folder-')) {
                 const targetFolderPath = overId.replace('folder-', '');
-                const folderPaths = folders.map(f => f.path);
-                const activeFolder = folders.find(f => f.id === activeId);
-                const overFolder = folders.find(f => f.path === targetFolderPath);
 
-                if (activeFolder && overFolder && activeFolder.path !== overFolder.path) {
-                    const oldIndex = folderPaths.indexOf(activeFolder.path);
-                    const newIndex = folderPaths.indexOf(overFolder.path);
-
-                    if (oldIndex !== -1 && newIndex !== -1) {
-                        const reorderedFolderPaths = arrayMove(folderPaths, oldIndex, newIndex);
-                        await reorderFolders(null, reorderedFolderPaths);
-                        toast.success('Folder reordered');
+                if (activeFolder.path !== targetFolderPath) {
+                    // Check if target is not a descendant of the source (prevent moving into itself)
+                    if (!targetFolderPath.startsWith(activeFolder.path + '/')) {
+                        try {
+                            await moveFolder(activeFolder.path, targetFolderPath);
+                            toast.success('Folder moved');
+                        } catch (error) {
+                            toast.error('Failed to move folder');
+                        }
                     }
+                }
+            }
+            return;
+        }
+
+        // Handle dropping password onto root (all passwords)
+        if (overId === 'folder-root') {
+            const password = passwords.find(p => p.id === activeId);
+            if (password && password.folderPath) {
+                try {
+                    // Move password to root - passing empty string means root passwords folder
+                    await movePasswordToFolder(activeId, '');
+                    toast.success('Password moved to root');
+                } catch (error) {
+                    toast.error('Failed to move password');
                 }
             }
             return;
@@ -312,61 +426,81 @@ export function PasswordsView() {
                 await reorderPasswords(passwordsDir, reorderedPasswordIds);
             }
         }
-    }, [draggedFolder, folders, passwords, filteredPasswords, currentFolderPath, reorderFolders, movePasswordToFolder, reorderPasswords]);
+    }, [draggedFolder, getFolderById, folders, passwords, filteredPasswords, currentFolderPath, moveFolder, movePasswordToFolder, reorderPasswords]);
 
-    // Render unlock/setup screen
-    if (!isUnlocked) {
+    // Show unlock screen if passwords access is locked
+    if (!isPasswordsAccessUnlocked) {
         return (
             <div className="h-full flex items-center justify-center bg-[#FAF9F7] dark:bg-[#1A1A1A]">
-                <div className="w-full max-w-md p-8 bg-white dark:bg-[#242424] rounded-2xl shadow-lg">
+                <div className="w-full max-w-sm p-8">
+                    {/* Lock Icon */}
                     <div className="flex justify-center mb-6">
-                        <div className="p-4 bg-[#DA7756]/10 dark:bg-[#DA7756]/20 rounded-full">
-                            <Lock className="w-8 h-8 text-[#DA7756]" />
+                        <div className="relative">
+                            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#DA7756] to-[#C96847] flex items-center justify-center shadow-lg">
+                                <Lock className="w-8 h-8 text-white" />
+                            </div>
                         </div>
                     </div>
 
-                    <h2 className="text-xl font-semibold text-center text-[#2D2D2D] dark:text-[#E8E6E3] mb-2">
-                        {isSettingUp ? 'Set Up Master Password' : 'Unlock Password Vault'}
-                    </h2>
-                    <p className="text-sm text-center text-[#9A948A] dark:text-[#8C857B] mb-6">
-                        {isSettingUp
-                            ? 'Create a master password to protect your passwords'
-                            : 'Enter your master password to access passwords'}
-                    </p>
+                    {/* Title */}
+                    <div className="text-center mb-6">
+                        <h2 className="text-xl font-semibold text-[#2D2D2D] dark:text-[#E8E6E3]">
+                            Passwords Locked
+                        </h2>
+                        <p className="text-sm text-[#6B6B6B] dark:text-[#B5AFA6] mt-2">
+                            Enter your master password to access passwords
+                        </p>
+                    </div>
 
-                    {unlockError && (
-                        <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm rounded-lg">
-                            {unlockError}
+                    {/* Unlock Form */}
+                    <form onSubmit={handleUnlock} className="space-y-4">
+                        <div>
+                            <input
+                                type="password"
+                                value={unlockPassword}
+                                onChange={(e) => {
+                                    setUnlockPassword(e.target.value);
+                                    if (passwordsError) clearPasswordsError();
+                                }}
+                                placeholder="Master password"
+                                className={`
+                                    w-full px-4 py-3 rounded-xl border
+                                    bg-white dark:bg-[#2E2E2E]
+                                    text-[#2D2D2D] dark:text-[#E8E6E3]
+                                    placeholder-[#B5AFA6] dark:placeholder-[#6B6B6B]
+                                    focus:outline-none focus:ring-2 focus:ring-[#DA7756]
+                                    ${passwordsError
+                                        ? 'border-red-400 dark:border-red-500'
+                                        : 'border-[#EBE8E4] dark:border-[#393939]'
+                                    }
+                                `}
+                                autoFocus
+                            />
+                            {passwordsError && (
+                                <p className="mt-2 text-sm text-red-500">{passwordsError}</p>
+                            )}
                         </div>
-                    )}
 
-                    <input
-                        type="password"
-                        placeholder="Master Password"
-                        value={masterPasswordInput}
-                        onChange={(e) => setMasterPasswordInput(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && !isSettingUp && handleUnlock()}
-                        className="w-full px-4 py-3 mb-3 bg-[#FAF9F7] dark:bg-[#1A1A1A] border border-[#EBE8E4] dark:border-[#2E2E2E] rounded-lg text-[#2D2D2D] dark:text-[#E8E6E3] focus:outline-none focus:ring-2 focus:ring-[#DA7756]"
-                        autoFocus
-                    />
+                        <button
+                            type="submit"
+                            disabled={isUnlocking || !unlockPassword.trim()}
+                            className={`
+                                w-full py-3 rounded-xl font-medium text-white
+                                transition-all duration-200
+                                ${isUnlocking || !unlockPassword.trim()
+                                    ? 'bg-[#DA7756]/50 cursor-not-allowed'
+                                    : 'bg-[#DA7756] hover:bg-[#C96847] shadow-md hover:shadow-lg'
+                                }
+                            `}
+                        >
+                            {isUnlocking ? 'Unlocking...' : 'Unlock Passwords'}
+                        </button>
+                    </form>
 
-                    {isSettingUp && (
-                        <input
-                            type="password"
-                            placeholder="Confirm Password"
-                            value={confirmPassword}
-                            onChange={(e) => setConfirmPassword(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleSetupMasterPassword()}
-                            className="w-full px-4 py-3 mb-4 bg-[#FAF9F7] dark:bg-[#1A1A1A] border border-[#EBE8E4] dark:border-[#2E2E2E] rounded-lg text-[#2D2D2D] dark:text-[#E8E6E3] focus:outline-none focus:ring-2 focus:ring-[#DA7756]"
-                        />
-                    )}
-
-                    <button
-                        onClick={isSettingUp ? handleSetupMasterPassword : handleUnlock}
-                        className="w-full py-3 bg-[#DA7756] hover:bg-[#C4644A] text-white font-medium rounded-lg transition-colors"
-                    >
-                        {isSettingUp ? 'Set Master Password' : 'Unlock'}
-                    </button>
+                    {/* Info */}
+                    <p className="text-xs text-center text-[#9A948A] dark:text-[#6B6B6B] mt-4">
+                        Passwords auto-lock after 10 minutes of inactivity
+                    </p>
                 </div>
             </div>
         );
@@ -378,6 +512,12 @@ export function PasswordsView() {
             collisionDetection={closestCorners}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
+            onDragCancel={handleDragCancel}
+            measuring={{
+                droppable: {
+                    strategy: MeasuringStrategy.Always,
+                },
+            }}
         >
             <div className="h-full flex bg-[#FAF9F7] dark:bg-[#1A1A1A]">
                 {/* Folder Sidebar */}
@@ -392,18 +532,22 @@ export function PasswordsView() {
                     {/* Header */}
                     <div className="p-3 border-b border-[#EBE8E4] dark:border-[#2E2E2E] flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                            <h2 className="font-semibold text-[#2D2D2D] dark:text-[#E8E6E3]">Passwords</h2>
+                            <h2 className="font-semibold text-[#2D2D2D] dark:text-[#E8E6E3]">
+                                {isTrashSelected ? 'Trash' : 'Passwords'}
+                            </h2>
                             <span className="text-xs text-[#9A948A] dark:text-[#8C857B]">
                                 ({filteredPasswords.length})
                             </span>
                         </div>
-                        <button
-                            onClick={() => openPasswordEditor()}
-                            className="p-1.5 hover:bg-[#F5F3F0] dark:hover:bg-[#2E2E2E] rounded-lg transition-colors"
-                            title="New Password"
-                        >
-                            <Plus className="w-4 h-4 text-[#B5AFA6]" />
-                        </button>
+                        {!isTrashSelected && (
+                            <button
+                                onClick={() => openPasswordEditor()}
+                                className="p-1.5 hover:bg-[#F5F3F0] dark:hover:bg-[#2E2E2E] rounded-lg transition-colors"
+                                title="New Password"
+                            >
+                                <Plus className="w-4 h-4 text-[#B5AFA6]" />
+                            </button>
+                        )}
                     </div>
 
                     {/* Password List */}
@@ -427,6 +571,7 @@ export function PasswordsView() {
                                             onDelete={() => handleDeletePassword(pwd.id)}
                                             cachedContent={getCachedContent(pwd.id)}
                                             onRequestContent={requestContent}
+                                            isTrashView={isTrashSelected}
                                         />
                                     ))}
                                 </div>
@@ -438,8 +583,59 @@ export function PasswordsView() {
 
             <DragOverlay>
                 {draggedPassword && (
-                    <div className="p-3 bg-white dark:bg-[#242424] border border-[#EBE8E4] dark:border-[#393939] rounded-xl opacity-90 shadow-xl w-64 pointer-events-none">
-                        <h3 className="font-medium text-sm text-[#2D2D2D] dark:text-[#E8E6E3]">{draggedPassword.title}</h3>
+                    <div
+                        className="relative bg-white dark:bg-[#2E2E2E] rounded-xl shadow-xl border-l-4 py-3 pr-3 pl-7 w-72 pointer-events-none"
+                        style={{ borderLeftColor: draggedPassword.color || '#DA7756' }}
+                    >
+                        {/* Match SortablePasswordCard structure */}
+                        <div className="absolute top-2 right-2 flex items-center gap-1">
+                            <Key className="w-3 h-3 text-[#DA7756] opacity-50" />
+                            {draggedPassword.pinned && <Pin className="w-3 h-3 text-[#DA7756]" />}
+                        </div>
+                        <h3 className="font-medium text-[#2D2D2D] dark:text-[#E8E6E3] text-sm truncate pr-10">
+                            {draggedPassword.title}
+                        </h3>
+                        {draggedPasswordContent ? (
+                            <>
+                                {draggedPasswordContent.notes && (
+                                    <div className="mt-1 flex items-center gap-1.5">
+                                        <FileText className="w-3 h-3 text-[#9A948A] flex-shrink-0" />
+                                        <span className="text-xs text-[#6B6B6B] dark:text-[#B5AFA6] truncate">{draggedPasswordContent.notes}</span>
+                                    </div>
+                                )}
+                                <div className="mt-1.5 flex items-center gap-4 text-xs">
+                                    {draggedPasswordContent.url && (
+                                        <div className="flex items-center gap-1 min-w-0">
+                                            <Globe className="w-3 h-3 text-[#9A948A] flex-shrink-0" />
+                                            <span className="text-[#3B82F6] truncate">{draggedPasswordContent.url}</span>
+                                        </div>
+                                    )}
+                                    {draggedPasswordContent.username && (
+                                        <div className="flex items-center gap-1 min-w-0">
+                                            <User className="w-3 h-3 text-[#9A948A] flex-shrink-0" />
+                                            <span className="text-[#2D2D2D] dark:text-[#E8E6E3] truncate">{draggedPasswordContent.username}</span>
+                                        </div>
+                                    )}
+                                </div>
+                            </>
+                        ) : (
+                            <div className="mt-1 text-xs text-[#B5AFA6] dark:text-[#6B6B6B]">Loading...</div>
+                        )}
+                        <div className="mt-2 flex items-center justify-between">
+                            <div className="flex items-center gap-1">
+                                {(draggedPassword.tags || []).slice(0, 2).map((tag, index) => (
+                                    <span key={`${tag}-${index}`} className="px-1 py-0 text-[9px] rounded bg-[#DA7756]/10 text-[#DA7756]">
+                                        {tag}
+                                    </span>
+                                ))}
+                                {(draggedPassword.tags || []).length > 2 && (
+                                    <span className="text-[9px] text-[#6B6B6B]">+{(draggedPassword.tags || []).length - 2}</span>
+                                )}
+                            </div>
+                            <span className="text-[10px] text-[#B5AFA6] dark:text-[#6B6B6B]">
+                                {new Date(draggedPassword.updated).toLocaleDateString()}
+                            </span>
+                        </div>
                     </div>
                 )}
                 {draggedFolder && (
@@ -463,6 +659,7 @@ const SortablePasswordCard = memo(function SortablePasswordCard({
     onDelete,
     cachedContent,
     onRequestContent,
+    isTrashView,
 }: {
     password: PasswordInfo;
     onCopy: () => void;
@@ -471,6 +668,7 @@ const SortablePasswordCard = memo(function SortablePasswordCard({
     onDelete: () => void;
     cachedContent: DecryptedPasswordContent | null;
     onRequestContent: (id: string) => void;
+    isTrashView: boolean;
 }) {
     const [showActions, setShowActions] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
@@ -485,8 +683,8 @@ const SortablePasswordCard = memo(function SortablePasswordCard({
     } = useSortable({ id: password.id });
 
     const style: React.CSSProperties = {
-        transform: CSS.Transform.toString(transform),
-        transition,
+        transform: CSS.Translate.toString(transform),
+        transition: isDragging ? undefined : transition,
         borderLeftColor: password.color || '#DA7756',
         opacity: isDragging ? 0.5 : 1,
     };
@@ -562,15 +760,17 @@ const SortablePasswordCard = memo(function SortablePasswordCard({
                 ${isDragging ? 'shadow-lg ring-2 ring-[#DA7756]' : ''}
             `}
         >
-            {/* Drag handle */}
-            <div
-                {...attributes}
-                {...listeners}
-                className="absolute left-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing p-1 hover:bg-[#EBE8E4] dark:hover:bg-[#393939] rounded transition-opacity z-10"
-                onClick={(e) => e.stopPropagation()}
-            >
-                <GripVertical className="w-3.5 h-3.5 text-[#B5AFA6] dark:text-[#6B6B6B]" />
-            </div>
+            {/* Drag handle - hidden in trash view */}
+            {!isTrashView && (
+                <div
+                    {...attributes}
+                    {...listeners}
+                    className="absolute left-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing p-1 hover:bg-[#EBE8E4] dark:hover:bg-[#393939] rounded transition-opacity z-10"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <GripVertical className="w-3.5 h-3.5 text-[#B5AFA6] dark:text-[#6B6B6B]" />
+                </div>
+            )}
 
             {/* Type indicator + Pinned */}
             <div className="absolute top-2 right-2 flex items-center gap-1">
@@ -674,7 +874,7 @@ const SortablePasswordCard = memo(function SortablePasswordCard({
                 <span className="text-[10px] text-[#B5AFA6] dark:text-[#6B6B6B] flex-shrink-0">{formattedDate}</span>
             </div>
 
-            {/* Actions overlay */}
+            {/* Actions overlay - only delete button in trash view */}
             {showActions && (
                 <motion.div
                     initial={{ opacity: 0 }}
@@ -683,13 +883,23 @@ const SortablePasswordCard = memo(function SortablePasswordCard({
                     onClick={(e) => e.stopPropagation()}
                     onMouseDown={(e) => e.stopPropagation()}
                 >
-                    <Button variant="ghost" size="icon" className="w-7 h-7 text-[#6B6B6B] hover:text-[#DA7756]" onClick={(e) => { e.stopPropagation(); onEdit(); }} title="Edit">
-                        <Edit2 className="w-3.5 h-3.5" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="w-7 h-7 text-[#6B6B6B] hover:text-[#DA7756]" onClick={(e) => { e.stopPropagation(); onPin(); }} title={password.pinned ? 'Unpin' : 'Pin'}>
-                        <Pin className={`w-3.5 h-3.5 ${password.pinned ? 'text-[#DA7756]' : ''}`} />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="w-7 h-7 text-[#E57373] hover:text-[#D32F2F]" onClick={(e) => { e.stopPropagation(); onDelete(); }} title="Delete">
+                    {!isTrashView && (
+                        <>
+                            <Button variant="ghost" size="icon" className="w-7 h-7 text-[#6B6B6B] hover:text-[#DA7756]" onClick={(e) => { e.stopPropagation(); onEdit(); }} title="Edit">
+                                <Edit2 className="w-3.5 h-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="w-7 h-7 text-[#6B6B6B] hover:text-[#DA7756]" onClick={(e) => { e.stopPropagation(); onPin(); }} title={password.pinned ? 'Unpin' : 'Pin'}>
+                                <Pin className={`w-3.5 h-3.5 ${password.pinned ? 'text-[#DA7756]' : ''}`} />
+                            </Button>
+                        </>
+                    )}
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="w-7 h-7 text-[#E57373] hover:text-[#D32F2F]"
+                        onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                        title={isTrashView ? 'Delete permanently' : 'Move to trash'}
+                    >
                         <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                 </motion.div>

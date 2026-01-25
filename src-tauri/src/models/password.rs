@@ -1,5 +1,5 @@
 // Password model for filesystem-based storage
-// UUID for stable ID, rank prefix for ordering
+// UUID for stable ID and filename, rank in frontmatter for ordering
 // All sensitive content is encrypted with master password
 
 use serde::{Deserialize, Serialize};
@@ -9,8 +9,10 @@ use std::path::PathBuf;
 /// Only non-sensitive metadata - all credentials are encrypted in body
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PasswordFrontmatter {
-    pub id: String,  // UUID - stable identifier
+    pub id: String,  // UUID - stable identifier (also used as filename)
     pub title: String,
+    #[serde(default)]
+    pub rank: u32,   // For ordering within folder
     #[serde(default)]
     pub color: String,
     #[serde(default)]
@@ -22,11 +24,12 @@ pub struct PasswordFrontmatter {
 }
 
 impl PasswordFrontmatter {
-    pub fn new(id: String, title: String) -> Self {
+    pub fn new(id: String, title: String, rank: u32) -> Self {
         let now = chrono::Utc::now().timestamp_millis();
         Self {
             id,
             title,
+            rank,
             color: "#DA7756".to_string(),
             pinned: false,
             tags: Vec::new(),
@@ -52,8 +55,6 @@ pub struct PasswordContent {
 /// Full password with parsed data and filesystem info
 #[derive(Debug, Clone)]
 pub struct Password {
-    pub rank: u32,
-    pub slug: String,
     pub path: PathBuf,
     pub folderPath: PathBuf,
     pub frontmatter: PasswordFrontmatter,

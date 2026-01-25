@@ -5,6 +5,8 @@ use parking_lot::RwLock;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
+use zeroize::Zeroizing;
 
 use crate::models::{
     Settings, SettingsOverride, WorkspaceEntry,
@@ -137,6 +139,30 @@ pub fn workspaceConfigPath(workspacePath: &str) -> PathBuf {
 }
 
 // ============================================
+// TRASH DIRECTORY HELPERS
+// ============================================
+
+/// Trash directory (hidden folder in workspace root)
+pub fn trashDir(workspacePath: &str) -> PathBuf {
+    PathBuf::from(workspacePath).join(".trash")
+}
+
+/// Trash notes directory
+pub fn trashNotesDir(workspacePath: &str) -> PathBuf {
+    trashDir(workspacePath).join("notes")
+}
+
+/// Trash tasks directory (contains todo/doing/done subfolders)
+pub fn trashTasksDir(workspacePath: &str) -> PathBuf {
+    trashDir(workspacePath).join("tasks")
+}
+
+/// Trash passwords directory
+pub fn trashPasswordsDir(workspacePath: &str) -> PathBuf {
+    trashDir(workspacePath).join("passwords")
+}
+
+// ============================================
 // FRONTMATTER PARSING
 // ============================================
 
@@ -164,31 +190,32 @@ pub fn toMarkdown<T: serde::Serialize>(frontmatter: &T, body: &str) -> Result<St
 }
 
 // ============================================
-// FILENAME PARSING
+// UUID FILENAME HELPERS
 // ============================================
 
-/// Parse rank and slug from filename (e.g., "000001-my-note.md" -> (1, "my-note"))
-pub fn parseFilename(filename: &str) -> Option<(u32, String)> {
+/// Create filename from UUID (with .md extension for files)
+pub fn uuidFilename(id: &str) -> String {
+    format!("{}.md", id)
+}
+
+/// Parse UUID from filename (strips .md extension and validates UUID format)
+pub fn parseUuidFilename(filename: &str) -> Option<String> {
     let name = filename.strip_suffix(".md").unwrap_or(filename);
-    let parts: Vec<&str> = name.splitn(2, '-').collect();
-    if parts.len() != 2 {
-        return None;
-    }
-    let rank: u32 = parts[0].parse().ok()?;
-    let slug = parts[1].to_string();
-    Some((rank, slug))
-}
-
-/// Create filename from rank and slug
-pub fn toFilename(rank: u32, slug: &str, isDir: bool) -> String {
-    if isDir {
-        format!("{:06}-{}", rank, slug)
+    // Validate UUID format
+    if uuid::Uuid::parse_str(name).is_ok() {
+        Some(name.to_string())
     } else {
-        format!("{:06}-{}.md", rank, slug)
+        None
     }
 }
 
-/// Generate slug from title
+/// Check if a directory name is a valid UUID (for folders)
+pub fn isValidUuidDir(dirname: &str) -> bool {
+    uuid::Uuid::parse_str(dirname).is_ok()
+}
+
+/// Generate slug from title (kept for potential display use)
+#[allow(dead_code)]
 pub fn slugify(title: &str) -> String {
     slug::slugify(title)
 }
@@ -206,6 +233,9 @@ pub struct WorkspaceData {
     pub tasks: Vec<Task>,
 }
 
+/// Passwords auto-lock timeout in seconds (10 minutes)
+const PASSWORDS_AUTO_LOCK_TIMEOUT_SECS: u64 = 600;
+
 /// Main storage manager
 pub struct Storage {
     pub workspacePath: RwLock<Option<String>>,
@@ -214,6 +244,14 @@ pub struct Storage {
     pub workspaces: RwLock<Vec<WorkspaceEntry>>,
     #[allow(dead_code)] // Reserved for future caching optimization
     pub data: RwLock<WorkspaceData>,
+    /// Cached derived key from master password (32 bytes, zeroized on drop)
+    derivedKey: RwLock<Option<Zeroizing<Vec<u8>>>>,
+    /// Last activity timestamp (kept for compatibility but not used for auto-lock)
+    lastActivity: RwLock<Option<Instant>>,
+    /// Whether passwords access is currently unlocked (separate from main vault)
+    passwordsAccessUnlocked: RwLock<bool>,
+    /// Last passwords activity timestamp for passwords-only auto-lock
+    lastPasswordsActivity: RwLock<Option<Instant>>,
 }
 
 impl Storage {
@@ -257,6 +295,10 @@ impl Storage {
             workspaceOverride: RwLock::new(workspaceOverride),
             workspaces: RwLock::new(workspaces),
             data: RwLock::new(WorkspaceData::default()),
+            derivedKey: RwLock::new(None),
+            lastActivity: RwLock::new(None),
+            passwordsAccessUnlocked: RwLock::new(false),
+            lastPasswordsActivity: RwLock::new(None),
         }
     }
 
@@ -272,6 +314,125 @@ impl Storage {
         let path = self.workspacePath.read().clone();
         println!("[Storage::getWorkspacePath] Current workspace: {:?}", path);
         path
+    }
+
+    // ============================================
+    // VAULT MANAGEMENT
+    // ============================================
+
+    /// Set the derived key from master password (call after unlock)
+    pub fn setDerivedKey(&self, key: Vec<u8>) {
+        let mut derivedKey = self.derivedKey.write();
+        *derivedKey = Some(Zeroizing::new(key));
+        self.updateActivity();
+        // Also unlock passwords access when vault is unlocked
+        self.unlockPasswordsAccess();
+    }
+
+    /// Get the derived key if vault is unlocked
+    /// Note: Main vault no longer auto-locks - only passwords have auto-lock
+    pub fn getDerivedKey(&self) -> Option<Vec<u8>> {
+        let key = self.derivedKey.read();
+        key.as_ref().map(|k| k.to_vec())
+    }
+
+    /// Get the master password for encryption operations
+    /// This returns the derived key as a base64 string for use with crypto functions
+    pub fn getMasterPassword(&self) -> Option<String> {
+        self.getDerivedKey().map(|k| {
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &k)
+        })
+    }
+
+    /// Check if vault is unlocked
+    /// Note: Main vault no longer auto-locks - only passwords have auto-lock
+    pub fn isUnlocked(&self) -> bool {
+        self.derivedKey.read().is_some()
+    }
+
+    /// Lock the vault (clear derived key from memory)
+    pub fn lock(&self) {
+        let mut derivedKey = self.derivedKey.write();
+        *derivedKey = None;
+        let mut lastActivity = self.lastActivity.write();
+        *lastActivity = None;
+        // Also lock passwords access
+        self.lockPasswordsAccess();
+        println!("[Storage::lock] Vault locked");
+    }
+
+    /// Update last activity timestamp (kept for compatibility)
+    pub fn updateActivity(&self) {
+        let mut lastActivity = self.lastActivity.write();
+        *lastActivity = Some(Instant::now());
+    }
+
+    // ============================================
+    // PASSWORDS-ONLY AUTO-LOCK
+    // ============================================
+
+    /// Unlock passwords access (grants access for 10 minutes)
+    pub fn unlockPasswordsAccess(&self) {
+        let mut unlocked = self.passwordsAccessUnlocked.write();
+        *unlocked = true;
+        let mut lastActivity = self.lastPasswordsActivity.write();
+        *lastActivity = Some(Instant::now());
+        println!("[Storage::unlockPasswordsAccess] Passwords access unlocked");
+    }
+
+    /// Lock passwords access
+    pub fn lockPasswordsAccess(&self) {
+        let mut unlocked = self.passwordsAccessUnlocked.write();
+        *unlocked = false;
+        let mut lastActivity = self.lastPasswordsActivity.write();
+        *lastActivity = None;
+        println!("[Storage::lockPasswordsAccess] Passwords access locked");
+    }
+
+    /// Update passwords activity timestamp (resets passwords auto-lock timer)
+    pub fn updatePasswordsActivity(&self) {
+        let mut lastActivity = self.lastPasswordsActivity.write();
+        *lastActivity = Some(Instant::now());
+    }
+
+    /// Check if passwords access should auto-lock due to inactivity
+    fn shouldPasswordsAutoLock(&self) -> bool {
+        let lastActivity = self.lastPasswordsActivity.read();
+        if let Some(last) = *lastActivity {
+            last.elapsed().as_secs() > PASSWORDS_AUTO_LOCK_TIMEOUT_SECS
+        } else {
+            false
+        }
+    }
+
+    /// Check if passwords access is unlocked (with auto-lock check)
+    pub fn isPasswordsAccessUnlocked(&self) -> bool {
+        // First check if vault is unlocked at all
+        if !self.isUnlocked() {
+            return false;
+        }
+
+        // Check passwords auto-lock
+        if self.shouldPasswordsAutoLock() {
+            self.lockPasswordsAccess();
+            return false;
+        }
+
+        *self.passwordsAccessUnlocked.read()
+    }
+
+    /// Get master password hash file path
+    pub fn masterPasswordHashPath(&self) -> Option<PathBuf> {
+        self.getWorkspacePath().map(|ws| {
+            PathBuf::from(&ws).join(".vault")
+        })
+    }
+
+    /// Check if master password has been set up
+    pub fn isVaultSetup(&self) -> bool {
+        self.masterPasswordHashPath()
+            .map(|p| p.exists())
+            .unwrap_or(false)
     }
 }
 

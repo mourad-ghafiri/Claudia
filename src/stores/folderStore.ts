@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import type { FolderInfo, UpdateFolderInput, Folder } from '../types';
+import { useTrashStore } from './trashStore';
 
 // Unified folder structure - no more separate notes/tasks folders
 interface FolderState {
@@ -13,7 +14,7 @@ interface FolderState {
     fetchFolders: () => Promise<void>;
     createFolder: (name: string, parentPath?: string) => Promise<FolderInfo>;
     updateFolder: (input: UpdateFolderInput) => Promise<void>;
-    deleteFolder: (path: string) => Promise<void>;
+    deleteFolder: (path: string, permanent?: boolean) => Promise<void>;
     setCurrentFolder: (folderPath: string | null) => void;
     reorderFolders: (parentPath: string | null, folderPaths: string[]) => Promise<void>;
     moveFolder: (folderPath: string, newParentPath: string | null) => Promise<void>;
@@ -122,9 +123,11 @@ export const useFolderStore = create<FolderState>((set, get) => ({
         await get().fetchFolders();
     },
 
-    deleteFolder: async (path: string) => {
-        await invoke('deleteFolder', { path });
+    deleteFolder: async (path: string, permanent?: boolean) => {
+        await invoke('deleteFolder', { path, permanent: permanent ?? false });
         await get().fetchFolders();
+        // Refresh trash counts (folder items are moved to trash)
+        useTrashStore.getState().fetchTrashCounts();
         window.dispatchEvent(new CustomEvent('folder-deleted', { detail: { folderPath: path } }));
     },
 

@@ -21,7 +21,6 @@ pub enum TaskStatus {
     Todo,
     Doing,
     Done,
-    Archived,
 }
 
 impl TaskStatus {
@@ -30,7 +29,6 @@ impl TaskStatus {
             "todo" => Some(Self::Todo),
             "doing" => Some(Self::Doing),
             "done" => Some(Self::Done),
-            "archived" => Some(Self::Archived),
             _ => None,
         }
     }
@@ -40,7 +38,6 @@ impl TaskStatus {
             Self::Todo => "todo",
             Self::Doing => "doing",
             Self::Done => "done",
-            Self::Archived => "archived",
         }
     }
 }

@@ -15,9 +15,10 @@ import { useState, useRef, useEffect, useMemo, memo } from 'react';
 interface KanbanCardProps {
   task: Task;
   columnStatus?: TaskStatus; // Optional - kept for potential future use
+  isTrashView?: boolean;
 }
 
-export const KanbanCard = memo(function KanbanCard({ task }: KanbanCardProps) {
+export const KanbanCard = memo(function KanbanCard({ task, isTrashView = false }: KanbanCardProps) {
   const { updateTask } = useTaskStore();
   // Track visibility with local state that syncs with store
   // This ensures we have accurate state for the toggle
@@ -52,9 +53,9 @@ export const KanbanCard = memo(function KanbanCard({ task }: KanbanCardProps) {
     isDragging,
   } = useSortable({ id: task.id });
 
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
+  const style: React.CSSProperties = {
+    transform: CSS.Translate.toString(transform),
+    transition: isDragging ? undefined : transition,
   };
 
   const isOverdue = task.due && isPast(new Date(task.due));
@@ -151,15 +152,17 @@ export const KanbanCard = memo(function KanbanCard({ task }: KanbanCardProps) {
         ${isDragging ? 'shadow-lg ring-2 ring-[#DA7756]' : ''}
       `}
     >
-      {/* Drag handle */}
-      <div
-        {...attributes}
-        {...listeners}
-        className="absolute left-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing p-1 hover:bg-[#EBE8E4] dark:hover:bg-[#393939] rounded transition-opacity z-10"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <GripVertical className="w-3.5 h-3.5 text-[#B5AFA6] dark:text-[#6B6B6B]" />
-      </div>
+      {/* Drag handle - hidden in trash view */}
+      {!isTrashView && (
+        <div
+          {...attributes}
+          {...listeners}
+          className="absolute left-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing p-1 hover:bg-[#EBE8E4] dark:hover:bg-[#393939] rounded transition-opacity z-10"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <GripVertical className="w-3.5 h-3.5 text-[#B5AFA6] dark:text-[#6B6B6B]" />
+        </div>
+      )}
 
       {/* Type indicator + Pinned */}
       <div className="absolute top-2 right-2 flex items-center gap-1">
@@ -217,7 +220,7 @@ export const KanbanCard = memo(function KanbanCard({ task }: KanbanCardProps) {
       )}
 
 
-      {/* Actions overlay */}
+      {/* Actions overlay - only delete button in trash view */}
       {showActions && (
         <motion.div
           initial={{ opacity: 0 }}
@@ -226,42 +229,47 @@ export const KanbanCard = memo(function KanbanCard({ task }: KanbanCardProps) {
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          <Button
-            variant="ghost"
-            size="icon"
-            className="w-7 h-7 text-[#6B6B6B] hover:text-[#DA7756]"
-            onClick={() => openTaskEditor(task.id)}
-          >
-            <Edit2 className="w-3.5 h-3.5" />
-          </Button>
-          {showVisibilityToggle && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="w-7 h-7 text-[#6B6B6B] hover:text-[#DA7756]"
-              onClick={toggleVisibility}
-              title={localIsVisible ? 'Hide floating window' : 'Show floating window'}
-            >
-              {localIsVisible ? (
-                <EyeOff className="w-3.5 h-3.5" />
-              ) : (
-                <Eye className="w-3.5 h-3.5" />
+          {!isTrashView && (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="w-7 h-7 text-[#6B6B6B] hover:text-[#DA7756]"
+                onClick={() => openTaskEditor(task.id)}
+              >
+                <Edit2 className="w-3.5 h-3.5" />
+              </Button>
+              {showVisibilityToggle && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="w-7 h-7 text-[#6B6B6B] hover:text-[#DA7756]"
+                  onClick={toggleVisibility}
+                  title={localIsVisible ? 'Hide floating window' : 'Show floating window'}
+                >
+                  {localIsVisible ? (
+                    <EyeOff className="w-3.5 h-3.5" />
+                  ) : (
+                    <Eye className="w-3.5 h-3.5" />
+                  )}
+                </Button>
               )}
-            </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="w-7 h-7 text-[#6B6B6B] hover:text-[#DA7756]"
+                onClick={togglePinned}
+              >
+                <Pin className={`w-3.5 h-3.5 ${task.pinned ? 'text-[#DA7756]' : ''}`} />
+              </Button>
+            </>
           )}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="w-7 h-7 text-[#6B6B6B] hover:text-[#DA7756]"
-            onClick={togglePinned}
-          >
-            <Pin className={`w-3.5 h-3.5 ${task.pinned ? 'text-[#DA7756]' : ''}`} />
-          </Button>
           <Button
             variant="ghost"
             size="icon"
             className="w-7 h-7 text-[#E57373] hover:text-[#D32F2F]"
             onClick={() => openDeleteConfirm(task.id, 'task')}
+            title={isTrashView ? 'Delete permanently' : 'Move to trash'}
           >
             <Trash2 className="w-3.5 h-3.5" />
           </Button>

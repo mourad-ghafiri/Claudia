@@ -1,9 +1,10 @@
 // Folder Sidebar with categories: Favorites, Pinned, All Folders
 import { useState, useEffect, useRef, useMemo, memo } from 'react';
-import { Home, PanelLeftClose, PanelLeft, Plus, ChevronDown, ChevronRight, Star, Pin, Folder, FolderOpen, MoreHorizontal, Pencil, Trash2, Palette, RefreshCw, GripVertical } from 'lucide-react';
+import { Home, PanelLeftClose, PanelLeft, Plus, ChevronDown, ChevronRight, Star, Pin, Folder, FolderOpen, MoreHorizontal, Pencil, Trash2, Palette, RefreshCw, GripVertical, RotateCcw } from 'lucide-react';
 import { useDroppable, useDraggable } from '@dnd-kit/core';
 import { useFolderStore } from '../../stores/folderStore';
 import { useUIStore } from '../../stores/uiStore';
+import { useTrashStore } from '../../stores/trashStore';
 import type { FolderInfo } from '../../types';
 import toast from 'react-hot-toast';
 
@@ -31,6 +32,56 @@ function flattenFolders(folders: FolderInfo[]): FolderInfo[] {
     return result;
 }
 
+// Root drop zone component for moving folders to root level
+const RootDropZone = memo(function RootDropZone({
+    currentFolderPath,
+    onSelect,
+    allItemsLabel,
+    isSidebarCollapsed,
+    isTrashSelected,
+}: {
+    currentFolderPath: string | null;
+    onSelect: () => void;
+    allItemsLabel: string;
+    isSidebarCollapsed: boolean;
+    isTrashSelected: boolean;
+}) {
+    // Make root droppable for folder moves
+    const { setNodeRef, isOver } = useDroppable({ id: 'folder-root' });
+
+    // "All Items" is selected when no folder is selected AND trash is not selected
+    const isAllItemsSelected = currentFolderPath === null && !isTrashSelected;
+
+    return (
+        <div className="relative group mx-2 mb-3" ref={setNodeRef}>
+            <div
+                onClick={onSelect}
+                className={`
+                    flex items-center gap-2 py-2 px-3 rounded-lg cursor-pointer transition-colors
+                    ${isOver
+                        ? 'bg-[#6B9F78]/20 ring-2 ring-[#6B9F78]'
+                        : isAllItemsSelected
+                            ? 'bg-[#DA7756]/15 text-[#DA7756]'
+                            : 'text-[#6B6B6B] dark:text-[#B5AFA6] hover:bg-[#EBE8E4] dark:hover:bg-[#2E2E2E]'
+                    }
+                `}
+            >
+                <Home className="w-4 h-4" />
+                {!isSidebarCollapsed && (
+                    <span className="text-sm font-medium">
+                        {allItemsLabel}
+                    </span>
+                )}
+            </div>
+            {isSidebarCollapsed && (
+                <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 bg-[#2D2D2D] dark:bg-[#1A1A1A] text-white text-xs rounded-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 shadow-lg">
+                    {allItemsLabel}
+                </div>
+            )}
+        </div>
+    );
+});
+
 export const FolderSidebar = memo(function FolderSidebar({
     title,
     allItemsLabel = 'All Items',
@@ -48,7 +99,13 @@ export const FolderSidebar = memo(function FolderSidebar({
         setFolderColor,
         moveFolder,
     } = useFolderStore();
-    const { openDeleteConfirm, isSidebarCollapsed, toggleSidebar } = useUIStore();
+    const { openDeleteConfirm, isSidebarCollapsed, toggleSidebar, isTrashSelected, setTrashSelected } = useUIStore();
+    const { counts, fetchTrashCounts, emptyTrash, restoreAll } = useTrashStore();
+
+    // Fetch trash counts on mount
+    useEffect(() => {
+        fetchTrashCounts();
+    }, [fetchTrashCounts]);
 
     // Section collapse states
     const [favoritesExpanded, setFavoritesExpanded] = useState(true);
@@ -79,6 +136,12 @@ export const FolderSidebar = memo(function FolderSidebar({
     const [showNewFolderDialog, setShowNewFolderDialog] = useState(false);
     const [showRenameDialog, setShowRenameDialog] = useState(false);
     const [showColorPicker, setShowColorPicker] = useState(false);
+    const [showEmptyTrashDialog, setShowEmptyTrashDialog] = useState(false);
+    const [showRestoreAllDialog, setShowRestoreAllDialog] = useState(false);
+    const [isEmptyingTrash, setIsEmptyingTrash] = useState(false);
+    const [isRestoringAll, setIsRestoringAll] = useState(false);
+    const [trashMenuOpen, setTrashMenuOpen] = useState(false);
+    const trashMenuRef = useRef<HTMLDivElement>(null);
     const [dialogFolder, setDialogFolder] = useState<FolderInfo | null>(null);
     const [folderName, setFolderName] = useState('');
     const [parentFolderPath, setParentFolderPath] = useState<string | null>(null);
@@ -97,11 +160,14 @@ export const FolderSidebar = memo(function FolderSidebar({
         fetchFolders();
     }, [fetchFolders]);
 
-    // Close context menu when clicking outside
+    // Close context menu and trash menu when clicking outside
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
             if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
                 setContextMenu(null);
+            }
+            if (trashMenuRef.current && !trashMenuRef.current.contains(e.target as Node)) {
+                setTrashMenuOpen(false);
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
@@ -110,6 +176,7 @@ export const FolderSidebar = memo(function FolderSidebar({
 
     const handleFolderSelect = (folderPath: string | null) => {
         setCurrentFolder(folderPath);
+        setTrashSelected(false); // Clear trash selection when selecting a folder
         onFolderChange?.(folderPath);
     };
 
@@ -250,6 +317,24 @@ export const FolderSidebar = memo(function FolderSidebar({
         },
     };
 
+    // Drop indicator for folder reordering - shows horizontal line between folders
+    const FolderDropIndicator = ({ parentPath, index, indent = 0 }: { parentPath: string | null; index: number; indent?: number }) => {
+        const dropId = `folder-reorder-${parentPath || 'root'}-${index}`;
+        const { setNodeRef, isOver } = useDroppable({ id: dropId });
+
+        return (
+            <div
+                ref={setNodeRef}
+                className="relative h-1 mx-1"
+                style={{ marginLeft: `${8 + indent * 16}px` }}
+            >
+                {isOver && (
+                    <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-0.5 bg-[#DA7756] rounded-full" />
+                )}
+            </div>
+        );
+    };
+
     // Render a single folder item with draggable (for reordering) and droppable (for note/folder drops) support
     const DraggableFolderItem = ({ folder, indent = 0 }: { folder: FolderInfo; indent?: number }) => {
         const isSelected = currentFolderPath === folder.path;
@@ -261,7 +346,6 @@ export const FolderSidebar = memo(function FolderSidebar({
             attributes,
             listeners,
             setNodeRef: setDraggableRef,
-            transform,
             isDragging,
         } = useDraggable({
             id: folder.id,
@@ -277,11 +361,6 @@ export const FolderSidebar = memo(function FolderSidebar({
             setDroppableRef(node);
         };
 
-        const style = transform ? {
-            transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
-            zIndex: isDragging ? 1000 : undefined,
-        } : undefined;
-
         return (
             <div
                 ref={setNodeRef}
@@ -290,7 +369,7 @@ export const FolderSidebar = memo(function FolderSidebar({
                 onContextMenu={(e) => handleContextMenu(e, folder)}
                 className={`
                     group flex items-center gap-1 py-1.5 px-2 mx-1 rounded-lg cursor-pointer transition-all duration-150
-                    ${isDragging ? 'shadow-lg ring-2 ring-[#DA7756] opacity-50' : ''}
+                    ${isDragging ? 'opacity-30' : ''}
                     ${isSelected
                         ? 'bg-[#DA7756]/15 text-[#DA7756]'
                         : isOver
@@ -298,7 +377,7 @@ export const FolderSidebar = memo(function FolderSidebar({
                             : 'text-[#2D2D2D] dark:text-[#E8E6E3] hover:bg-[#EBE8E4] dark:hover:bg-[#2E2E2E]'
                     }
                 `}
-                style={{ ...style, paddingLeft: `${8 + indent * 16}px` }}
+                style={{ paddingLeft: `${8 + indent * 16}px` }}
             >
                 {/* Drag handle */}
                 <div
@@ -353,16 +432,23 @@ export const FolderSidebar = memo(function FolderSidebar({
     };
 
     // Render folder with children (conditionally based on expansion state)
-    const renderFolderWithChildren = (folder: FolderInfo, indent: number = 0) => {
+    const renderFolderWithChildren = (folder: FolderInfo, index: number, _siblings: FolderInfo[], parentPath: string | null, indent: number = 0) => {
         const isExpanded = expandedFolderIds.has(folder.id);
         const hasChildren = folder.children && folder.children.length > 0;
+        const isFirst = index === 0;
 
         return (
             <div key={folder.path}>
+                {/* Drop indicator before first item */}
+                {isFirst && <FolderDropIndicator parentPath={parentPath} index={0} indent={indent} />}
                 <DraggableFolderItem folder={folder} indent={indent} />
+                {/* Drop indicator after each item */}
+                <FolderDropIndicator parentPath={parentPath} index={index + 1} indent={indent} />
                 {hasChildren && isExpanded && (
                     <div>
-                        {folder.children.map(child => renderFolderWithChildren(child, indent + 1))}
+                        {folder.children.map((child, childIndex) =>
+                            renderFolderWithChildren(child, childIndex, folder.children, folder.path, indent + 1)
+                        )}
                     </div>
                 )}
             </div>
@@ -394,8 +480,14 @@ export const FolderSidebar = memo(function FolderSidebar({
                 {expanded && (
                     <div className="mt-1">
                         {flat
-                            ? items.map(f => <DraggableFolderItem key={f.path} folder={f} />)
-                            : items.map(f => renderFolderWithChildren(f, 0))
+                            ? items.map((f, index) => (
+                                <div key={f.path}>
+                                    {index === 0 && <FolderDropIndicator parentPath={null} index={0} />}
+                                    <DraggableFolderItem folder={f} />
+                                    <FolderDropIndicator parentPath={null} index={index + 1} />
+                                </div>
+                            ))
+                            : items.map((f, index) => renderFolderWithChildren(f, index, items, null, 0))
                         }
                     </div>
                 )}
@@ -405,7 +497,7 @@ export const FolderSidebar = memo(function FolderSidebar({
 
     return (
         <div className={`
-            flex flex-col flex-shrink-0 bg-[#FAF9F7] dark:bg-[#242424] border-r border-[#EBE8E4] dark:border-[#2E2E2E] transition-all duration-200
+            flex flex-col flex-shrink-0 overflow-hidden bg-[#FAF9F7] dark:bg-[#242424] border-r border-[#EBE8E4] dark:border-[#2E2E2E] transition-all duration-200
             ${isSidebarCollapsed ? 'w-14' : 'w-56'}
         `}>
             {/* Header */}
@@ -451,32 +543,15 @@ export const FolderSidebar = memo(function FolderSidebar({
             </div>
 
             {/* Content */}
-            <div className="flex-1 overflow-y-auto py-2" style={{ scrollbarGutter: 'stable' }}>
-                {/* All Items */}
-                <div className="relative group mx-2 mb-3">
-                    <div
-                        onClick={() => handleFolderSelect(null)}
-                        className={`
-                            flex items-center gap-2 py-2 px-3 rounded-lg cursor-pointer transition-colors
-                            ${currentFolderPath === null
-                                ? 'bg-[#DA7756]/15 text-[#DA7756]'
-                                : 'text-[#6B6B6B] dark:text-[#B5AFA6] hover:bg-[#EBE8E4] dark:hover:bg-[#2E2E2E]'
-                            }
-                        `}
-                    >
-                        <Home className="w-4 h-4" />
-                        {!isSidebarCollapsed && (
-                            <span className="text-sm font-medium">
-                                {allItemsLabel}
-                            </span>
-                        )}
-                    </div>
-                    {isSidebarCollapsed && (
-                        <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 bg-[#2D2D2D] dark:bg-[#1A1A1A] text-white text-xs rounded-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 shadow-lg">
-                            {allItemsLabel}
-                        </div>
-                    )}
-                </div>
+            <div className="flex-1 overflow-y-auto overflow-x-hidden py-2" style={{ scrollbarGutter: 'stable' }}>
+                {/* All Items - also serves as drop zone for moving folders to root */}
+                <RootDropZone
+                    currentFolderPath={currentFolderPath}
+                    onSelect={() => handleFolderSelect(null)}
+                    allItemsLabel={allItemsLabel}
+                    isSidebarCollapsed={isSidebarCollapsed}
+                    isTrashSelected={isTrashSelected}
+                />
 
                 {!isSidebarCollapsed && (
                     <>
@@ -555,10 +630,95 @@ export const FolderSidebar = memo(function FolderSidebar({
                 )}
             </div>
 
-            {/* Footer */}
+            {/* Footer - Trash (Expanded) */}
             {!isSidebarCollapsed && (
-                <div className="p-3 border-t border-[#EBE8E4] dark:border-[#2E2E2E] text-xs text-[#B5AFA6] dark:text-[#6B6B6B]">
-                    {folders.length} folder{folders.length !== 1 ? 's' : ''}
+                <div
+                    onClick={() => {
+                        setCurrentFolder(null);
+                        setTrashSelected(true);
+                    }}
+                    className={`p-3 border-t border-[#EBE8E4] dark:border-[#2E2E2E] flex items-center gap-2 cursor-pointer transition-colors group ${
+                        isTrashSelected
+                            ? 'bg-[#DA7756]/15 text-[#DA7756]'
+                            : 'text-[#B5AFA6] dark:text-[#6B6B6B] hover:text-[#DA7756] hover:bg-[#DA7756]/5'
+                    }`}
+                >
+                    <Trash2 className="w-4 h-4" />
+                    <span className="text-sm">Trash</span>
+                    {counts.total > 0 && (
+                        <>
+                            <span className={`px-1.5 py-0.5 text-xs rounded ${
+                                isTrashSelected ? 'bg-[#DA7756]/20' : 'bg-[#EBE8E4] dark:bg-[#393939]'
+                            }`}>
+                                {counts.total}
+                            </span>
+                            <div className="relative ml-auto" ref={trashMenuRef}>
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setTrashMenuOpen(!trashMenuOpen);
+                                    }}
+                                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-[#DA7756]/20 rounded transition-all"
+                                    title="Trash options"
+                                >
+                                    <MoreHorizontal className="w-4 h-4" />
+                                </button>
+                                {trashMenuOpen && (
+                                    <div className="absolute bottom-full right-0 mb-1 bg-white dark:bg-[#2E2E2E] border border-[#EBE8E4] dark:border-[#393939] rounded-xl shadow-xl py-1 min-w-[160px] z-50">
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setTrashMenuOpen(false);
+                                                setShowRestoreAllDialog(true);
+                                            }}
+                                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#2D2D2D] dark:text-[#E8E6E3] hover:bg-[#EBE8E4] dark:hover:bg-[#393939]"
+                                        >
+                                            <RotateCcw className="w-4 h-4" /> Restore All
+                                        </button>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setTrashMenuOpen(false);
+                                                setShowEmptyTrashDialog(true);
+                                            }}
+                                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#D66565] hover:bg-[#EBE8E4] dark:hover:bg-[#393939]"
+                                        >
+                                            <Trash2 className="w-4 h-4" /> Empty Trash
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        </>
+                    )}
+                </div>
+            )}
+
+            {/* Footer - Trash (Collapsed) */}
+            {isSidebarCollapsed && (
+                <div className="p-2 border-t border-[#EBE8E4] dark:border-[#2E2E2E]">
+                    <div className="relative group">
+                        <button
+                            onClick={() => {
+                                setCurrentFolder(null);
+                                setTrashSelected(true);
+                            }}
+                            className={`w-full p-2 rounded-lg transition-colors relative ${
+                                isTrashSelected
+                                    ? 'bg-[#DA7756]/15 text-[#DA7756]'
+                                    : 'text-[#B5AFA6] dark:text-[#6B6B6B] hover:text-[#DA7756] hover:bg-[#DA7756]/10'
+                            }`}
+                        >
+                            <Trash2 className="w-4 h-4 mx-auto" />
+                            {counts.total > 0 && (
+                                <span className="absolute -top-1 -right-1 w-4 h-4 flex items-center justify-center text-[10px] bg-[#DA7756] text-white rounded-full">
+                                    {counts.total > 9 ? '9+' : counts.total}
+                                </span>
+                            )}
+                        </button>
+                        <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 bg-[#2D2D2D] dark:bg-[#1A1A1A] text-white text-xs rounded-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 shadow-lg">
+                            Trash {counts.total > 0 ? `(${counts.total})` : ''}
+                        </div>
+                    </div>
                 </div>
             )}
 
@@ -687,6 +847,88 @@ export const FolderSidebar = memo(function FolderSidebar({
                                 className="px-4 py-2 text-sm text-[#6B6B6B] dark:text-[#B5AFA6] hover:text-[#2D2D2D] dark:hover:text-[#E8E6E3] transition-colors"
                             >
                                 Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Empty Trash Confirmation Dialog */}
+            {showEmptyTrashDialog && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-white dark:bg-[#242424] border border-[#EBE8E4] dark:border-[#393939] rounded-xl shadow-xl w-80 p-6 text-center">
+                        <div className="w-12 h-12 rounded-full bg-[#E57373]/20 dark:bg-[#E57373]/30 mx-auto mb-4 flex items-center justify-center">
+                            <Trash2 className="w-6 h-6 text-[#E57373]" />
+                        </div>
+                        <h3 className="text-lg font-semibold text-[#2D2D2D] dark:text-[#E8E6E3] mb-2">Empty Trash</h3>
+                        <p className="text-sm text-[#6B6B6B] dark:text-[#B5AFA6] mb-6">
+                            Are you sure you want to <span className="font-medium text-[#E57373]">permanently delete</span> all {counts.total} items in trash? This action cannot be undone.
+                        </p>
+                        <div className="flex justify-center gap-3">
+                            <button
+                                onClick={() => setShowEmptyTrashDialog(false)}
+                                className="px-4 py-2 text-sm font-medium text-[#6B6B6B] dark:text-[#B5AFA6] hover:text-[#2D2D2D] dark:hover:text-[#E8E6E3] transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    setIsEmptyingTrash(true);
+                                    try {
+                                        await emptyTrash();
+                                        toast.success('Trash emptied');
+                                        setShowEmptyTrashDialog(false);
+                                    } catch (error) {
+                                        toast.error('Failed to empty trash');
+                                    } finally {
+                                        setIsEmptyingTrash(false);
+                                    }
+                                }}
+                                disabled={isEmptyingTrash}
+                                className="px-4 py-2 text-sm font-medium text-white bg-[#E57373] hover:bg-[#D66565] rounded-lg transition-colors disabled:opacity-50"
+                            >
+                                {isEmptyingTrash ? 'Emptying...' : 'Empty Trash'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Restore All Confirmation Dialog */}
+            {showRestoreAllDialog && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-white dark:bg-[#242424] border border-[#EBE8E4] dark:border-[#393939] rounded-xl shadow-xl w-80 p-6 text-center">
+                        <div className="w-12 h-12 rounded-full bg-[#6B9F78]/20 dark:bg-[#6B9F78]/30 mx-auto mb-4 flex items-center justify-center">
+                            <RotateCcw className="w-6 h-6 text-[#6B9F78]" />
+                        </div>
+                        <h3 className="text-lg font-semibold text-[#2D2D2D] dark:text-[#E8E6E3] mb-2">Restore All</h3>
+                        <p className="text-sm text-[#6B6B6B] dark:text-[#B5AFA6] mb-6">
+                            Are you sure you want to restore all {counts.total} items from trash? They will be moved to the root folders.
+                        </p>
+                        <div className="flex justify-center gap-3">
+                            <button
+                                onClick={() => setShowRestoreAllDialog(false)}
+                                className="px-4 py-2 text-sm font-medium text-[#6B6B6B] dark:text-[#B5AFA6] hover:text-[#2D2D2D] dark:hover:text-[#E8E6E3] transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    setIsRestoringAll(true);
+                                    try {
+                                        await restoreAll();
+                                        toast.success('All items restored');
+                                        setShowRestoreAllDialog(false);
+                                    } catch (error) {
+                                        toast.error('Failed to restore items');
+                                    } finally {
+                                        setIsRestoringAll(false);
+                                    }
+                                }}
+                                disabled={isRestoringAll}
+                                className="px-4 py-2 text-sm font-medium text-white bg-[#6B9F78] hover:bg-[#5A8A67] rounded-lg transition-colors disabled:opacity-50"
+                            >
+                                {isRestoringAll ? 'Restoring...' : 'Restore All'}
                             </button>
                         </div>
                     </div>

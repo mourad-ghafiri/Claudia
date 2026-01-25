@@ -7,11 +7,13 @@ import { TagInput } from '../ui/TagInput';
 import { usePasswordStore } from '../../stores/passwordStore';
 import { useFolderStore } from '../../stores/folderStore';
 import { useUIStore } from '../../stores/uiStore';
+import { useVaultStore } from '../../stores/vaultStore';
 import toast from 'react-hot-toast';
 
 export function PasswordEditor() {
     const { isPasswordEditorOpen, editingPasswordId, closePasswordEditor } = useUIStore();
-    const { getPasswordById, createPassword, updatePassword, getDecryptedContent, isUnlocked } = usePasswordStore();
+    const { getPasswordById, createPassword, updatePassword, getDecryptedContent } = usePasswordStore();
+    const { isUnlocked } = useVaultStore();
     const { currentFolderPath } = useFolderStore();
 
     const [title, setTitle] = useState('');

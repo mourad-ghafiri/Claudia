@@ -11,12 +11,15 @@ import { TaskEditor } from './components/task/TaskEditor';
 import { PasswordEditor } from './components/password/PasswordEditor';
 import { DeleteConfirm } from './components/ui/DeleteConfirm';
 import { SettingsModal } from './components/settings/SettingsModal';
+import { VaultSetupScreen } from './components/vault/VaultSetupScreen';
+import { VaultUnlockScreen } from './components/vault/VaultUnlockScreen';
 import { useUIStore, type ViewType } from './stores/uiStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { useTaskStore } from './stores/taskStore';
 import { useNoteStore } from './stores/noteStore';
 import { useFolderStore } from './stores/folderStore';
 import { useWorkspaceStore } from './stores/workspaceStore';
+import { useVaultStore } from './stores/vaultStore';
 import { useFloatingWindows } from './hooks/useFloatingWindows';
 import { useNotifications } from './hooks/useNotifications';
 
@@ -27,6 +30,7 @@ function App() {
   const { fetchNotes } = useNoteStore();
   const { fetchFolders } = useFolderStore();
   const { currentWorkspace, fetchWorkspaces, fetchCurrentWorkspace, openFolderDialog } = useWorkspaceStore();
+  const { isUnlocked, isSetup, isLoading: vaultLoading, checkVaultStatus } = useVaultStore();
 
   // Initialize floating windows manager
   useFloatingWindows();
@@ -41,14 +45,21 @@ function App() {
     fetchSettings();
   }, [fetchWorkspaces, fetchCurrentWorkspace, fetchSettings]);
 
-  // Load workspace data when workspace changes
+  // Check vault status when workspace changes
   useEffect(() => {
     if (currentWorkspace) {
+      checkVaultStatus();
+    }
+  }, [currentWorkspace, checkVaultStatus]);
+
+  // Load workspace data when workspace changes AND vault is unlocked
+  useEffect(() => {
+    if (currentWorkspace && isUnlocked) {
       fetchTasks();
       fetchNotes();
       fetchFolders();
     }
-  }, [currentWorkspace, fetchTasks, fetchNotes, fetchFolders]);
+  }, [currentWorkspace, isUnlocked, fetchTasks, fetchNotes, fetchFolders]);
 
   // Apply default mode only on initial load (once) - wait for settings to be fetched
   const hasAppliedDefaultMode = useRef(false);
@@ -219,6 +230,52 @@ function App() {
         <WorkspaceHome />
       </div>
     );
+  }
+
+  // Show vault loading state
+  if (vaultLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-[#FAF9F7] dark:bg-[#1A1A1A]">
+        <div className="flex flex-col items-center gap-6">
+          {/* Animated logo */}
+          <div className="relative">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#DA7756] to-[#C96847] flex items-center justify-center shadow-lg">
+              <svg className="w-9 h-9 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+            </div>
+            {/* Animated ring */}
+            <div className="absolute inset-0 -m-1">
+              <div className="w-[72px] h-[72px] rounded-2xl border-2 border-[#DA7756]/30 animate-ping" style={{ animationDuration: '1.5s' }} />
+            </div>
+          </div>
+
+          {/* App name */}
+          <div className="text-center">
+            <h1 className="text-xl font-semibold text-[#2D2D2D] dark:text-[#E8E6E3]">Claudia</h1>
+            <p className="text-sm text-[#6B6B6B] dark:text-[#B5AFA6] mt-1">Unlocking vault...</p>
+          </div>
+
+          {/* Loading dots */}
+          <div className="flex items-center gap-1.5">
+            <div className="w-2 h-2 rounded-full bg-[#DA7756] animate-bounce" style={{ animationDelay: '0ms' }} />
+            <div className="w-2 h-2 rounded-full bg-[#DA7756] animate-bounce" style={{ animationDelay: '150ms' }} />
+            <div className="w-2 h-2 rounded-full bg-[#DA7756] animate-bounce" style={{ animationDelay: '300ms' }} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show vault setup if not configured
+  if (!isSetup) {
+    return <VaultSetupScreen />;
+  }
+
+  // Show vault unlock if locked
+  if (!isUnlocked) {
+    return <VaultUnlockScreen />;
   }
 
   return (

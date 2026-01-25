@@ -1,9 +1,9 @@
 [package]
 name = "claudia"
-version = "0.1.0"
-description = "A modern notes and task management application"
+version = "1.0.0"
+description = "A modern notes, tasks and passwords management application"
 authors = ["Mourad Ghafiri"]
-edition = "2021"
+edition = "2024"
 
 [lib]
 name = "claudia_lib"

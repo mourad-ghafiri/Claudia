@@ -8,10 +8,10 @@
 // ============================================
 
 // Backend returns lowercase status
-export type TaskStatus = 'todo' | 'doing' | 'done' | 'archived';
+export type TaskStatus = 'todo' | 'doing' | 'done';
 
 // Legacy uppercase aliases for gradual migration
-export type TaskStatusUpper = 'TODO' | 'DOING' | 'DONE' | 'ARCHIVED';
+export type TaskStatusUpper = 'TODO' | 'DOING' | 'DONE';
 
 // ============================================
 // COMMON TYPES
@@ -55,7 +55,6 @@ export interface FolderInfo {
   id: string;
   name: string;
   rank: number;
-  slug: string;
   pinned: boolean;
   favorite: boolean;
   color: string;
@@ -88,7 +87,6 @@ export interface NoteInfo {
   id: string;
   title: string;
   rank: number;
-  slug: string;
   color: string;
   pinned: boolean;
   tags: string[];
@@ -126,7 +124,6 @@ export interface TaskInfo {
   id: string;
   title: string;
   rank: number;
-  slug: string;
   status: TaskStatus;
   color: string;
   pinned: boolean;
@@ -170,7 +167,6 @@ export interface PasswordInfo {
   id: string;
   title: string;
   rank: number;
-  slug: string;
   color: string;
   pinned: boolean;
   tags: string[];
@@ -197,7 +193,6 @@ export interface CreatePasswordInput {
   notes?: string;
   color?: string;
   tags?: string[];
-  masterPassword: string;
 }
 
 export interface UpdatePasswordInput {
@@ -210,7 +205,6 @@ export interface UpdatePasswordInput {
   color?: string;
   pinned?: boolean;
   tags?: string[];
-  masterPassword: string;
 }
 
 // ============================================
@@ -339,6 +333,56 @@ export interface Password extends PasswordInfo {
 }
 
 // ============================================
+// TRASH TYPES
+// ============================================
+
+/** TrashNoteInfo from backend - matches Rust commands::trash::TrashNoteInfo */
+export interface TrashNoteInfo {
+  id: string;
+  title: string;
+  color: string;
+  pinned: boolean;
+  tags: string[];
+  created: number;
+  updated: number;
+  path: string;
+}
+
+/** TrashTaskInfo from backend - matches Rust commands::trash::TrashTaskInfo */
+export interface TrashTaskInfo {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  color: string;
+  pinned: boolean;
+  tags: string[];
+  due: number | null;
+  created: number;
+  updated: number;
+  path: string;
+}
+
+/** TrashPasswordInfo from backend - matches Rust commands::trash::TrashPasswordInfo */
+export interface TrashPasswordInfo {
+  id: string;
+  title: string;
+  color: string;
+  pinned: boolean;
+  tags: string[];
+  created: number;
+  updated: number;
+  path: string;
+}
+
+/** TrashCounts from backend */
+export interface TrashCounts {
+  notes: number;
+  tasks: number;
+  passwords: number;
+  total: number;
+}
+
+// ============================================
 // HELPER FUNCTIONS
 // ============================================
 
@@ -348,7 +392,6 @@ export function toNote(info: NoteInfo, content: string = ''): Note {
     id: info.id,
     title: info.title,
     rank: info.rank,
-    slug: info.slug,
     color: info.color,
     pinned: info.pinned,
     tags: info.tags,
@@ -372,7 +415,6 @@ export function toTask(info: TaskInfo, description: string = ''): Task {
     id: info.id,
     title: info.title,
     rank: info.rank,
-    slug: info.slug,
     status: info.status,
     color: info.color,
     pinned: info.pinned,

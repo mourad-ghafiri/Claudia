@@ -384,3 +384,30 @@ input:focus, textarea:focus, select:focus {
   background-color: rgba(218, 119, 86, 0.3);
   color: #E8E6E3;
 }
+
+/* Drag and Drop optimizations */
+[data-dragging="true"] {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+/* Ensure smooth transforms during drag */
+.cursor-grab {
+  touch-action: none;
+}
+
+.cursor-grabbing {
+  cursor: grabbing !important;
+}
+
+/* Prevent text selection during drag operations */
+[data-dnd-kit-disabled-icon="true"] {
+  pointer-events: none !important;
+}
+
+/* Optimize rendering during drag */
+[data-state="dragging"] {
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}

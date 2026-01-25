@@ -19,7 +19,6 @@ function transformTask(taskInfo: any): Task {
     title: taskInfo.title,
     description: '',  // Content loaded separately
     rank: taskInfo.rank ?? 0,
-    slug: taskInfo.slug ?? '',
     status: (taskInfo.status as TaskStatus) ?? 'todo',
     color: taskInfo.color ?? '#3B82F6',
     pinned: taskInfo.pinned ?? false,
@@ -46,7 +45,6 @@ function transformNote(noteInfo: any, content: string = ''): Note {
     title: noteInfo.title,
     content: content,
     rank: noteInfo.rank ?? 0,
-    slug: noteInfo.slug ?? '',
     color: noteInfo.color ?? '#6B9F78',
     pinned: noteInfo.pinned ?? false,
     tags: noteInfo.tags ?? [],

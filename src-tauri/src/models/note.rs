@@ -1,5 +1,5 @@
 // Note model for filesystem-based storage
-// UUID for stable ID, rank prefix for ordering
+// UUID for stable ID and filename, rank in frontmatter for ordering
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -8,8 +8,10 @@ use super::common::FloatWindow;
 /// Note frontmatter (YAML header in .md file)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NoteFrontmatter {
-    pub id: String,  // UUID - stable identifier
+    pub id: String,  // UUID - stable identifier (also used as filename)
     pub title: String,
+    #[serde(default)]
+    pub rank: u32,   // For ordering within folder
     #[serde(default)]
     pub color: String,
     #[serde(default)]
@@ -23,11 +25,12 @@ pub struct NoteFrontmatter {
 }
 
 impl NoteFrontmatter {
-    pub fn new(id: String, title: String) -> Self {
+    pub fn new(id: String, title: String, rank: u32) -> Self {
         let now = chrono::Utc::now().timestamp_millis();
         Self {
             id,
             title,
+            rank,
             color: "#6B9F78".to_string(),
             pinned: false,
             tags: Vec::new(),
@@ -41,8 +44,6 @@ impl NoteFrontmatter {
 /// Full note with parsed data and filesystem info
 #[derive(Debug, Clone)]
 pub struct Note {
-    pub rank: u32,           // From filename prefix (e.g., 000001)
-    pub slug: String,        // From filename (e.g., "my-note")
     pub path: PathBuf,       // Full path to .md file
     pub folderPath: PathBuf, // Parent folder path
     pub frontmatter: NoteFrontmatter,

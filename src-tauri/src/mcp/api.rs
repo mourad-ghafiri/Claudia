@@ -1,7 +1,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use crate::storage::{StorageState, foldersDir, notesDir, tasksDir, toFilename, slugify, toMarkdown, validateFolderPath};
+use crate::storage::{StorageState, foldersDir, notesDir, tasksDir, uuidFilename, validateFolderPath};
+use crate::encrypted_storage;
 // Note: notesDir and tasksDir are used for root-level paths
 use crate::models::{Note, NoteFrontmatter, Task, TaskFrontmatter, TaskStatus, Folder, FolderFrontmatter, FloatWindow};
 use crate::commands::common::newId;
@@ -13,11 +14,18 @@ use crate::commands::folder::{FolderInfo, scanFolders};
 // Notes API
 // ============================================
 
-pub fn get_notes(storage: &StorageState, folder_path: Option<&str>) -> Vec<NoteInfo> {
+pub fn get_notes(storage: &StorageState, folder_path: Option<&str>) -> Result<Vec<NoteInfo>, String> {
     let wsPath = match storage.getWorkspacePath() {
         Some(p) => p,
-        None => return Vec::new(),
+        None => return Ok(Vec::new()),
     };
+
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword();
+    let passwordRef = masterPassword.as_deref();
 
     let notes = match folder_path {
         Some(fp) if !fp.is_empty() => {
@@ -25,30 +33,64 @@ pub fn get_notes(storage: &StorageState, folder_path: Option<&str>) -> Vec<NoteI
             match validateFolderPath(&wsPath, fp) {
                 Ok(validatedPath) => {
                     let notesSubdir = validatedPath.join("notes");
-                    scanNotesInFolder(&notesSubdir)
+                    scanNotesInFolder(&notesSubdir, passwordRef)
                 }
-                Err(_) => return Vec::new(), // Invalid path, return empty
+                Err(_) => return Ok(Vec::new()), // Invalid path, return empty
             }
         }
         _ => {
             // Scan all notes across all folders
-            scanAllNotes(&foldersDir(&wsPath))
+            scanAllNotes(&foldersDir(&wsPath), passwordRef)
         }
     };
 
-    notes.iter().map(NoteInfo::from).collect()
+    storage.updateActivity();
+    Ok(notes.iter().map(NoteInfo::from).collect())
 }
 
-pub fn get_note_by_id(storage: &StorageState, id: &str) -> Option<NoteInfo> {
-    let wsPath = storage.getWorkspacePath()?;
-    let notes = scanAllNotes(&foldersDir(&wsPath));
-    notes.iter().find(|n| n.frontmatter.id == id).map(NoteInfo::from)
+pub fn get_note_by_id(storage: &StorageState, id: &str) -> Result<Option<NoteInfo>, String> {
+    let wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
+
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword();
+    let passwordRef = masterPassword.as_deref();
+
+    let notes = scanAllNotes(&foldersDir(&wsPath), passwordRef);
+    storage.updateActivity();
+    Ok(notes.iter().find(|n| n.frontmatter.id == id).map(NoteInfo::from))
 }
 
-pub fn get_note_content(storage: &StorageState, id: &str) -> Option<String> {
-    let wsPath = storage.getWorkspacePath()?;
-    let notes = scanAllNotes(&foldersDir(&wsPath));
-    notes.iter().find(|n| n.frontmatter.id == id).map(|n| n.content.clone())
+pub fn get_note_content(storage: &StorageState, id: &str) -> Result<Option<String>, String> {
+    let wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
+
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword().ok_or("No master password")?;
+    let notes = scanAllNotes(&foldersDir(&wsPath), Some(&masterPassword));
+
+    let note = match notes.iter().find(|n| n.frontmatter.id == id) {
+        Some(n) => n,
+        None => return Ok(None),
+    };
+
+    // Read and decrypt content from file
+    let fileContent = fs::read_to_string(&note.path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    let content = if encrypted_storage::isEncryptedFormat(&fileContent) {
+        let encrypted = encrypted_storage::parseEncryptedFile(&fileContent)?;
+        encrypted_storage::decryptContent(&encrypted.content, &masterPassword)?
+    } else {
+        note.content.clone()
+    };
+
+    storage.updateActivity();
+    Ok(Some(content))
 }
 
 pub fn create_note(
@@ -60,6 +102,12 @@ pub fn create_note(
     tags: Option<&[String]>,
 ) -> Result<NoteInfo, String> {
     let wsPath = storage.getWorkspacePath().ok_or("No workspace selected")?;
+
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword().ok_or("No master password")?;
 
     // If folder_path is provided, create notes in folder_path/notes/
     // Otherwise use the root workspace/folders/notes/
@@ -75,15 +123,16 @@ pub fn create_note(
 
     fs::create_dir_all(&notesSubdir).map_err(|e| e.to_string())?;
 
-    let existingNotes = scanNotesInFolder(&notesSubdir);
-    let nextRank = existingNotes.iter().map(|n| n.rank).max().unwrap_or(0) + 1;
+    // Find next rank from existing notes
+    let existingNotes = scanNotesInFolder(&notesSubdir, Some(&masterPassword));
+    let nextRank = existingNotes.iter().map(|n| n.frontmatter.rank).max().unwrap_or(0) + 1;
 
-    let slug = slugify(title);
-    let filename = toFilename(nextRank, &slug, false);
+    // UUID is the filename
+    let id = newId();
+    let filename = uuidFilename(&id);
     let notePath = notesSubdir.join(&filename);
 
-    let id = newId();
-    let mut fm = NoteFrontmatter::new(id, title.to_string());
+    let mut fm = NoteFrontmatter::new(id, title.to_string(), nextRank);
     if let Some(c) = color {
         fm.color = c.to_string();
     }
@@ -92,18 +141,17 @@ pub fn create_note(
     }
 
     let body = content.unwrap_or_default().to_string();
-    let file_content = toMarkdown(&fm, &body)?;
+    let file_content = encrypted_storage::serializeAndEncrypt(&fm, &body, &masterPassword)?;
     fs::write(&notePath, file_content).map_err(|e| e.to_string())?;
 
     let note = Note {
-        rank: nextRank,
-        slug,
         path: notePath,
         folderPath: notesSubdir,
         frontmatter: fm,
         content: body,
     };
 
+    storage.updateActivity();
     Ok(NoteInfo::from(&note))
 }
 
@@ -118,14 +166,30 @@ pub fn update_note(
     float: Option<FloatWindow>,
 ) -> Result<(), String> {
     let wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
-    let notes = scanAllNotes(&foldersDir(&wsPath));
+
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword().ok_or("No master password")?;
+    let notes = scanAllNotes(&foldersDir(&wsPath), Some(&masterPassword));
 
     let note = notes.iter()
         .find(|n| n.frontmatter.id == id)
         .ok_or("Note not found")?;
 
     let mut fm = note.frontmatter.clone();
-    let mut body = note.content.clone();
+
+    // Get existing content from file
+    let fileContent = fs::read_to_string(&note.path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    let mut body = if encrypted_storage::isEncryptedFormat(&fileContent) {
+        let encrypted = encrypted_storage::parseEncryptedFile(&fileContent)?;
+        encrypted_storage::decryptContent(&encrypted.content, &masterPassword)?
+    } else {
+        note.content.clone()
+    };
 
     if let Some(t) = title {
         fm.title = t.to_string();
@@ -148,15 +212,24 @@ pub fn update_note(
 
     fm.updated = chrono::Utc::now().timestamp_millis();
 
-    let file_content = toMarkdown(&fm, &body)?;
+    let file_content = encrypted_storage::serializeAndEncrypt(&fm, &body, &masterPassword)?;
     fs::write(&note.path, file_content).map_err(|e| e.to_string())?;
 
+    storage.updateActivity();
     Ok(())
 }
 
 pub fn delete_note(storage: &StorageState, id: &str) -> Result<(), String> {
     let wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
-    let notes = scanAllNotes(&foldersDir(&wsPath));
+
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword();
+    let passwordRef = masterPassword.as_deref();
+
+    let notes = scanAllNotes(&foldersDir(&wsPath), passwordRef);
 
     let note = notes.iter()
         .find(|n| n.frontmatter.id == id)
@@ -165,33 +238,51 @@ pub fn delete_note(storage: &StorageState, id: &str) -> Result<(), String> {
     fs::remove_file(&note.path).map_err(|e| e.to_string())
 }
 
-pub fn search_notes(storage: &StorageState, query: &str) -> Vec<NoteInfo> {
+pub fn search_notes(storage: &StorageState, query: &str) -> Result<Vec<NoteInfo>, String> {
     let wsPath = match storage.getWorkspacePath() {
         Some(p) => p,
-        None => return Vec::new(),
+        None => return Ok(Vec::new()),
     };
 
-    let notes = scanAllNotes(&foldersDir(&wsPath));
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword();
+    let passwordRef = masterPassword.as_deref();
+
+    let notes = scanAllNotes(&foldersDir(&wsPath), passwordRef);
     let query_lower = query.to_lowercase();
 
-    notes.iter()
+    // Note: This only searches metadata (title) since content is not decrypted during scan
+    // For full-text search, would need to decrypt each file's content
+    let result = notes.iter()
         .filter(|n| {
-            n.frontmatter.title.to_lowercase().contains(&query_lower) ||
-            n.content.to_lowercase().contains(&query_lower)
+            n.frontmatter.title.to_lowercase().contains(&query_lower)
         })
         .map(NoteInfo::from)
-        .collect()
+        .collect();
+
+    storage.updateActivity();
+    Ok(result)
 }
 
 // ============================================
 // Tasks API
 // ============================================
 
-pub fn get_tasks(storage: &StorageState, folder_path: Option<&str>, status_filter: Option<&str>) -> Vec<TaskInfo> {
+pub fn get_tasks(storage: &StorageState, folder_path: Option<&str>, status_filter: Option<&str>) -> Result<Vec<TaskInfo>, String> {
     let wsPath = match storage.getWorkspacePath() {
         Some(p) => p,
-        None => return Vec::new(),
+        None => return Ok(Vec::new()),
     };
+
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword();
+    let passwordRef = masterPassword.as_deref();
 
     let tasks = match folder_path {
         Some(fp) if !fp.is_empty() => {
@@ -199,14 +290,14 @@ pub fn get_tasks(storage: &StorageState, folder_path: Option<&str>, status_filte
             match validateFolderPath(&wsPath, fp) {
                 Ok(validatedPath) => {
                     let tasksSubdir = validatedPath.join("tasks");
-                    scanTasksInFolder(&tasksSubdir)
+                    scanTasksInFolder(&tasksSubdir, passwordRef)
                 }
-                Err(_) => return Vec::new(), // Invalid path, return empty
+                Err(_) => return Ok(Vec::new()), // Invalid path, return empty
             }
         }
         _ => {
             // Scan all tasks across all folders
-            scanAllTasks(&foldersDir(&wsPath))
+            scanAllTasks(&foldersDir(&wsPath), passwordRef)
         }
     };
 
@@ -217,19 +308,53 @@ pub fn get_tasks(storage: &StorageState, folder_path: Option<&str>, status_filte
         tasks
     };
 
-    filtered.iter().map(TaskInfo::from).collect()
+    storage.updateActivity();
+    Ok(filtered.iter().map(TaskInfo::from).collect())
 }
 
-pub fn get_task_by_id(storage: &StorageState, id: &str) -> Option<TaskInfo> {
-    let wsPath = storage.getWorkspacePath()?;
-    let tasks = scanAllTasks(&foldersDir(&wsPath));
-    tasks.iter().find(|t| t.frontmatter.id == id).map(TaskInfo::from)
+pub fn get_task_by_id(storage: &StorageState, id: &str) -> Result<Option<TaskInfo>, String> {
+    let wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
+
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword();
+    let passwordRef = masterPassword.as_deref();
+
+    let tasks = scanAllTasks(&foldersDir(&wsPath), passwordRef);
+    storage.updateActivity();
+    Ok(tasks.iter().find(|t| t.frontmatter.id == id).map(TaskInfo::from))
 }
 
-pub fn get_task_content(storage: &StorageState, id: &str) -> Option<String> {
-    let wsPath = storage.getWorkspacePath()?;
-    let tasks = scanAllTasks(&foldersDir(&wsPath));
-    tasks.iter().find(|t| t.frontmatter.id == id).map(|t| t.content.clone())
+pub fn get_task_content(storage: &StorageState, id: &str) -> Result<Option<String>, String> {
+    let wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
+
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword().ok_or("No master password")?;
+    let tasks = scanAllTasks(&foldersDir(&wsPath), Some(&masterPassword));
+
+    let task = match tasks.iter().find(|t| t.frontmatter.id == id) {
+        Some(t) => t,
+        None => return Ok(None),
+    };
+
+    // Read and decrypt content from file
+    let fileContent = fs::read_to_string(&task.path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    let content = if encrypted_storage::isEncryptedFormat(&fileContent) {
+        let encrypted = encrypted_storage::parseEncryptedFile(&fileContent)?;
+        encrypted_storage::decryptContent(&encrypted.content, &masterPassword)?
+    } else {
+        task.content.clone()
+    };
+
+    storage.updateActivity();
+    Ok(Some(content))
 }
 
 pub fn create_task(
@@ -242,6 +367,12 @@ pub fn create_task(
     due: Option<i64>,
 ) -> Result<TaskInfo, String> {
     let wsPath = storage.getWorkspacePath().ok_or("No workspace selected")?;
+
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword().ok_or("No master password")?;
 
     // If folder_path is provided, create tasks in folder_path/tasks/
     // Otherwise use the root workspace/folders/tasks/
@@ -262,15 +393,16 @@ pub fn create_task(
     let statusPath = tasksSubdir.join(task_status.folderName());
     fs::create_dir_all(&statusPath).map_err(|e| e.to_string())?;
 
-    let existingTasks = scanTasksInStatus(&statusPath, &tasksSubdir, task_status);
-    let nextRank = existingTasks.iter().map(|t| t.rank).max().unwrap_or(0) + 1;
+    // Find next rank from existing tasks
+    let existingTasks = scanTasksInStatus(&statusPath, &tasksSubdir, task_status, Some(&masterPassword));
+    let nextRank = existingTasks.iter().map(|t| t.frontmatter.rank).max().unwrap_or(0) + 1;
 
-    let slug = slugify(title);
-    let filename = toFilename(nextRank, &slug, false);
+    // UUID is the filename
+    let id = newId();
+    let filename = uuidFilename(&id);
     let taskPath = statusPath.join(&filename);
 
-    let id = newId();
-    let mut fm = TaskFrontmatter::new(id, title.to_string());
+    let mut fm = TaskFrontmatter::new(id, title.to_string(), nextRank);
     if let Some(c) = color {
         fm.color = c.to_string();
     }
@@ -279,12 +411,10 @@ pub fn create_task(
     }
 
     let body = content.unwrap_or_default().to_string();
-    let file_content = toMarkdown(&fm, &body)?;
+    let file_content = encrypted_storage::serializeAndEncrypt(&fm, &body, &masterPassword)?;
     fs::write(&taskPath, file_content).map_err(|e| e.to_string())?;
 
     let task = Task {
-        rank: nextRank,
-        slug,
         path: taskPath,
         folderPath: tasksSubdir,
         status: task_status,
@@ -292,6 +422,7 @@ pub fn create_task(
         content: body,
     };
 
+    storage.updateActivity();
     Ok(TaskInfo::from(&task))
 }
 
@@ -309,15 +440,31 @@ pub fn update_task(
     float: Option<FloatWindow>,
 ) -> Result<(), String> {
     let wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
-    let tasks = scanAllTasks(&foldersDir(&wsPath));
+
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword().ok_or("No master password")?;
+    let tasks = scanAllTasks(&foldersDir(&wsPath), Some(&masterPassword));
 
     let task = tasks.iter()
         .find(|t| t.frontmatter.id == id)
         .ok_or("Task not found")?;
 
     let mut fm = task.frontmatter.clone();
-    let mut body = task.content.clone();
     let mut newPath = task.path.clone();
+
+    // Get existing content from file
+    let fileContent = fs::read_to_string(&task.path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    let mut body = if encrypted_storage::isEncryptedFormat(&fileContent) {
+        let encrypted = encrypted_storage::parseEncryptedFile(&fileContent)?;
+        encrypted_storage::decryptContent(&encrypted.content, &masterPassword)?
+    } else {
+        task.content.clone()
+    };
 
     if let Some(t) = title {
         fm.title = t.to_string();
@@ -355,17 +502,28 @@ pub fn update_task(
 
     fm.updated = chrono::Utc::now().timestamp_millis();
 
-    let file_content = toMarkdown(&fm, &body)?;
+    let file_content = encrypted_storage::serializeAndEncrypt(&fm, &body, &masterPassword)?;
 
     if newPath != task.path {
         fs::remove_file(&task.path).map_err(|e| e.to_string())?;
     }
-    fs::write(&newPath, file_content).map_err(|e| e.to_string())
+    fs::write(&newPath, file_content).map_err(|e| e.to_string())?;
+
+    storage.updateActivity();
+    Ok(())
 }
 
 pub fn delete_task(storage: &StorageState, id: &str) -> Result<(), String> {
     let wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
-    let tasks = scanAllTasks(&foldersDir(&wsPath));
+
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword();
+    let passwordRef = masterPassword.as_deref();
+
+    let tasks = scanAllTasks(&foldersDir(&wsPath), passwordRef);
 
     let task = tasks.iter()
         .find(|t| t.frontmatter.id == id)
@@ -378,15 +536,24 @@ pub fn delete_task(storage: &StorageState, id: &str) -> Result<(), String> {
 // Folders API
 // ============================================
 
-pub fn get_folders(storage: &StorageState) -> Vec<FolderInfo> {
+pub fn get_folders(storage: &StorageState) -> Result<Vec<FolderInfo>, String> {
     let wsPath = match storage.getWorkspacePath() {
         Some(p) => p,
-        None => return Vec::new(),
+        None => return Ok(Vec::new()),
     };
 
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword();
+    let passwordRef = masterPassword.as_deref();
+
     let baseDir = foldersDir(&wsPath);
-    let folders = scanFolders(&baseDir, None);
-    folders.iter().map(FolderInfo::from).collect()
+    let folders = scanFolders(&baseDir, None, passwordRef);
+
+    storage.updateActivity();
+    Ok(folders.iter().map(FolderInfo::from).collect())
 }
 
 pub fn create_folder(
@@ -396,42 +563,53 @@ pub fn create_folder(
 ) -> Result<FolderInfo, String> {
     let wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
 
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword().ok_or("No master password")?;
+
     let baseDir = foldersDir(&wsPath);
 
     let parentDir = parent_path
         .map(PathBuf::from)
         .unwrap_or(baseDir.clone());
 
-    let existingFolders = scanFolders(&parentDir, None);
-    let nextRank = existingFolders.iter().map(|f| f.rank).max().unwrap_or(0) + 1;
+    // Find next rank from existing folders
+    let existingFolders = scanFolders(&parentDir, None, Some(&masterPassword));
+    let nextRank = existingFolders.iter().map(|f| f.frontmatter.rank).max().unwrap_or(0) + 1;
 
-    let slug = slugify(name);
-    let folderName = toFilename(nextRank, &slug, true);
-    let folderPath = parentDir.join(&folderName);
+    // UUID is the directory name (no extension for directories)
+    let id = newId();
+    let folderPath = parentDir.join(&id);
 
     fs::create_dir_all(&folderPath).map_err(|e| e.to_string())?;
 
-    let id = newId();
-    let fm = FolderFrontmatter::new(id.clone(), name.to_string());
-    let content = toMarkdown(&fm, "")?;
-    fs::write(folderPath.join(".folder.md"), content).map_err(|e| e.to_string())?;
+    // Create .folder.md with encrypted metadata (folders have no body content)
+    let fm = FolderFrontmatter::new(id.clone(), name.to_string(), nextRank);
+    let fileContent = encrypted_storage::createEncryptedFile(
+        &serde_yaml::to_string(&fm).map_err(|e| e.to_string())?,
+        "", // Folders have no body content
+        &masterPassword,
+    )?;
+    fs::write(folderPath.join(".folder.md"), fileContent).map_err(|e| e.to_string())?;
 
-    // Create notes/ and tasks/ subdirectories
+    // Create notes/, tasks/, and passwords/ subdirectories
     fs::create_dir_all(folderPath.join("notes")).map_err(|e| e.to_string())?;
     fs::create_dir_all(folderPath.join("tasks")).map_err(|e| e.to_string())?;
-    for status in ["todo", "doing", "done", "archived"] {
+    fs::create_dir_all(folderPath.join("passwords")).map_err(|e| e.to_string())?;
+    for status in ["todo", "doing", "done"] {
         fs::create_dir_all(folderPath.join("tasks").join(status)).map_err(|e| e.to_string())?;
     }
 
     let folder = Folder {
-        rank: nextRank,
-        slug,
         path: folderPath.clone(),
         parentPath: Some(parentDir),
-        frontmatter: Some(fm),
+        frontmatter: fm,
         children: Vec::new(),
     };
 
+    storage.updateActivity();
     Ok(FolderInfo::from(&folder))
 }
 
@@ -445,7 +623,13 @@ pub fn delete_folder(_storage: &StorageState, path: &str) -> Result<(), String> 
 
 pub fn move_note_to_folder(storage: &StorageState, id: &str, target_folder_path: &str) -> Result<NoteInfo, String> {
     let wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
-    let notes = scanAllNotes(&foldersDir(&wsPath));
+
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword().ok_or("No master password")?;
+    let notes = scanAllNotes(&foldersDir(&wsPath), Some(&masterPassword));
 
     let note = notes.iter()
         .find(|n| n.frontmatter.id == id)
@@ -455,29 +639,55 @@ pub fn move_note_to_folder(storage: &StorageState, id: &str, target_folder_path:
     let targetNotesDir = PathBuf::from(target_folder_path).join("notes");
     fs::create_dir_all(&targetNotesDir).map_err(|e| e.to_string())?;
 
-    let existingNotes = scanNotesInFolder(&targetNotesDir);
-    let nextRank = existingNotes.iter().map(|n| n.rank).max().unwrap_or(0) + 1;
+    // Find next rank in target folder
+    let existingNotes = scanNotesInFolder(&targetNotesDir, Some(&masterPassword));
+    let nextRank = existingNotes.iter().map(|n| n.frontmatter.rank).max().unwrap_or(0) + 1;
 
-    let newFilename = toFilename(nextRank, &note.slug, false);
-    let newPath = targetNotesDir.join(&newFilename);
+    // Same UUID filename, new location
+    let newPath = targetNotesDir.join(uuidFilename(&note.frontmatter.id));
 
-    fs::rename(&note.path, &newPath).map_err(|e| e.to_string())?;
+    // Update frontmatter with new rank
+    let mut fm = note.frontmatter.clone();
+    fm.rank = nextRank;
 
-    let movedNote = Note {
-        rank: nextRank,
-        slug: note.slug.clone(),
-        path: newPath,
-        folderPath: targetNotesDir,
-        frontmatter: note.frontmatter.clone(),
-        content: note.content.clone(),
+    // Get content from file
+    let fileContent = fs::read_to_string(&note.path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    let body = if encrypted_storage::isEncryptedFormat(&fileContent) {
+        let encrypted = encrypted_storage::parseEncryptedFile(&fileContent)?;
+        encrypted_storage::decryptContent(&encrypted.content, &masterPassword)?
+    } else {
+        note.content.clone()
     };
 
+    // Encrypt and write to new location
+    let content = encrypted_storage::serializeAndEncrypt(&fm, &body, &masterPassword)?;
+    fs::write(&newPath, &content).map_err(|e| e.to_string())?;
+
+    // Remove old file
+    fs::remove_file(&note.path).map_err(|e| e.to_string())?;
+
+    let movedNote = Note {
+        path: newPath,
+        folderPath: targetNotesDir,
+        frontmatter: fm,
+        content: body,
+    };
+
+    storage.updateActivity();
     Ok(NoteInfo::from(&movedNote))
 }
 
 pub fn move_task_to_folder(storage: &StorageState, id: &str, target_folder_path: &str) -> Result<TaskInfo, String> {
     let wsPath = storage.getWorkspacePath().ok_or("No workspace")?;
-    let tasks = scanAllTasks(&foldersDir(&wsPath));
+
+    if !storage.isUnlocked() {
+        return Err("Vault is locked".to_string());
+    }
+
+    let masterPassword = storage.getMasterPassword().ok_or("No master password")?;
+    let tasks = scanAllTasks(&foldersDir(&wsPath), Some(&masterPassword));
 
     let task = tasks.iter()
         .find(|t| t.frontmatter.id == id)
@@ -488,23 +698,43 @@ pub fn move_task_to_folder(storage: &StorageState, id: &str, target_folder_path:
     let statusPath = targetTasksDir.join(task.status.folderName());
     fs::create_dir_all(&statusPath).map_err(|e| e.to_string())?;
 
-    let existingTasks = scanTasksInStatus(&statusPath, &targetTasksDir, task.status);
-    let nextRank = existingTasks.iter().map(|t| t.rank).max().unwrap_or(0) + 1;
+    // Find next rank in target folder
+    let existingTasks = scanTasksInStatus(&statusPath, &targetTasksDir, task.status, Some(&masterPassword));
+    let nextRank = existingTasks.iter().map(|t| t.frontmatter.rank).max().unwrap_or(0) + 1;
 
-    let newFilename = toFilename(nextRank, &task.slug, false);
-    let newPath = statusPath.join(&newFilename);
+    // Same UUID filename, new location
+    let newPath = statusPath.join(uuidFilename(&task.frontmatter.id));
 
-    fs::rename(&task.path, &newPath).map_err(|e| e.to_string())?;
+    // Update frontmatter with new rank
+    let mut fm = task.frontmatter.clone();
+    fm.rank = nextRank;
+
+    // Get content from file
+    let fileContent = fs::read_to_string(&task.path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    let body = if encrypted_storage::isEncryptedFormat(&fileContent) {
+        let encrypted = encrypted_storage::parseEncryptedFile(&fileContent)?;
+        encrypted_storage::decryptContent(&encrypted.content, &masterPassword)?
+    } else {
+        task.content.clone()
+    };
+
+    // Encrypt and write to new location
+    let content = encrypted_storage::serializeAndEncrypt(&fm, &body, &masterPassword)?;
+    fs::write(&newPath, &content).map_err(|e| e.to_string())?;
+
+    // Remove old file
+    fs::remove_file(&task.path).map_err(|e| e.to_string())?;
 
     let movedTask = Task {
-        rank: nextRank,
-        slug: task.slug.clone(),
         path: newPath,
         folderPath: targetTasksDir,
         status: task.status,
-        frontmatter: task.frontmatter.clone(),
-        content: task.content.clone(),
+        frontmatter: fm,
+        content: body,
     };
 
+    storage.updateActivity();
     Ok(TaskInfo::from(&movedTask))
 }

@@ -14,35 +14,33 @@ interface KanbanColumnProps {
   tasks: Task[];
   color: string;
   isOver?: boolean;
+  isTrashView?: boolean;
 }
 
 const columnColors: Record<TaskStatus, string> = {
   todo: 'bg-[#F5F3F0] dark:bg-[#242424]',
   doing: 'bg-[#DA7756]/5 dark:bg-[#DA7756]/10',
   done: 'bg-[#6B9F78]/5 dark:bg-[#6B9F78]/10',
-  archived: 'bg-[#EBE8E4] dark:bg-[#2E2E2E]',
 };
 
 const headerColors: Record<TaskStatus, string> = {
   todo: 'text-[#4A4A4A] dark:text-[#B5AFA6]',
   doing: 'text-[#DA7756]',
   done: 'text-[#6B9F78]',
-  archived: 'text-[#B5AFA6] dark:text-[#6B6B6B]',
 };
 
 const dotColors: Record<TaskStatus, string> = {
   todo: 'bg-[#B5AFA6]',
   doing: 'bg-[#DA7756]',
   done: 'bg-[#6B9F78]',
-  archived: 'bg-[#B5AFA6]',
 };
 
-export const KanbanColumn = memo(function KanbanColumn({ id, title, tasks, isOver: isOverProp }: KanbanColumnProps) {
+export const KanbanColumn = memo(function KanbanColumn({ id, title, tasks, isOver: isOverProp, isTrashView = false }: KanbanColumnProps) {
   // Use droppable for the column itself (for empty columns or dropping at the end)
-  const { setNodeRef, isOver: isOverDroppable } = useDroppable({ id });
+  const { setNodeRef, isOver: isOverDroppable, active } = useDroppable({ id });
 
-  // Combine parent's isOver with our own isOver for visual feedback
-  const showDropIndicator = isOverProp || isOverDroppable;
+  // Show drop indicator when actively dragging and hovering over this column
+  const showDropIndicator = (isOverProp || isOverDroppable) && active !== null;
 
   // Memoize task IDs array to prevent SortableContext re-renders
   const taskIds = useMemo(() => tasks.map((t) => t.id), [tasks]);
@@ -77,9 +75,9 @@ export const KanbanColumn = memo(function KanbanColumn({ id, title, tasks, isOve
           items={taskIds}
           strategy={verticalListSortingStrategy}
         >
-          <AnimatePresence mode="popLayout">
+          <AnimatePresence mode="sync">
             {tasks.map((task) => (
-              <KanbanCard key={task.id} task={task} columnStatus={id} />
+              <KanbanCard key={task.id} task={task} columnStatus={id} isTrashView={isTrashView} />
             ))}
           </AnimatePresence>
         </SortableContext>

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Modal } from '../ui/Modal';
 import { useUIStore } from '../../stores/uiStore';
 import { useSettingsStore } from '../../stores/settingsStore';
-import { usePasswordStore } from '../../stores/passwordStore';
+import { useVaultStore } from '../../stores/vaultStore';
 import { Sun, Moon, Monitor, Bell, Layers, Home, FileText, ListTodo, Lock, Eye, EyeOff } from 'lucide-react';
 import type { Settings } from '../../types';
 import toast from 'react-hot-toast';
@@ -86,12 +86,12 @@ function applyThemeToDocument(theme: 'light' | 'dark' | 'system') {
 export function SettingsModal() {
   const { isSettingsOpen, closeSettings } = useUIStore();
   const { settings, fetchSettings, updateSettings } = useSettingsStore();
-  const { changeMasterPassword, isMasterPasswordSet, lock } = usePasswordStore();
+  const { changePassword, isSetup, lock } = useVaultStore();
   const [localSettings, setLocalSettings] = useState<Settings>(settings);
   const [isSaving, setIsSaving] = useState(false);
 
   // Master password change state
-  const [hasMasterPassword, setHasMasterPassword] = useState(false);
+  // hasMasterPassword is now determined by isSetup from vaultStore
   const [showPasswordSection, setShowPasswordSection] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -103,8 +103,8 @@ export function SettingsModal() {
   useEffect(() => {
     if (isSettingsOpen) {
       fetchSettings();
-      // Check if master password is set
-      isMasterPasswordSet().then(setHasMasterPassword);
+      // Note: We don't call checkVaultStatus() here because it sets isLoading=true
+      // which causes App.tsx to show loading screen and unmount the modal
     } else {
       // Reset password fields when modal closes
       setShowPasswordSection(false);
@@ -114,7 +114,7 @@ export function SettingsModal() {
       setShowCurrentPassword(false);
       setShowNewPassword(false);
     }
-  }, [isSettingsOpen, fetchSettings, isMasterPasswordSet]);
+  }, [isSettingsOpen, fetchSettings]);
 
   useEffect(() => {
     setLocalSettings(settings);
@@ -136,16 +136,19 @@ export function SettingsModal() {
 
     setIsChangingPassword(true);
     try {
-      await changeMasterPassword(currentPassword, newPassword);
+      await changePassword(currentPassword, newPassword);
       toast.success('Master password changed successfully');
-      lock(); // Lock the vault after changing password
+      // Clear form state
       setShowPasswordSection(false);
       setCurrentPassword('');
       setNewPassword('');
       setConfirmNewPassword('');
+      // Close settings modal before locking
+      closeSettings();
+      // Lock the vault after changing password - requires re-unlock
+      await lock();
     } catch (error) {
       toast.error(String(error));
-    } finally {
       setIsChangingPassword(false);
     }
   };
@@ -314,7 +317,7 @@ export function SettingsModal() {
         </SettingsSection>
 
         {/* Security */}
-        {hasMasterPassword && (
+        {isSetup && (
           <SettingsSection title="Security" icon={<Lock className="w-4 h-4" />}>
             {!showPasswordSection ? (
               <SettingsRow label="Master Password" description="Change your vault master password">

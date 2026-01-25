@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import type { TaskInfo, TaskStatus, CreateTaskInput, UpdateTaskInput, Task, FloatWindow } from '../types';
+import type { TaskInfo, TaskStatus, CreateTaskInput, UpdateTaskInput, Task, FloatWindow, TrashTaskInfo } from '../types';
 import { toTask } from '../types';
+import { useTrashStore } from './trashStore';
 
 // Content cache for task descriptions with LRU eviction to prevent memory leaks
 const MAX_CONTENT_CACHE_SIZE = 100;
@@ -30,11 +31,12 @@ interface TaskState {
     // Actions
     fetchTasks: () => Promise<void>;
     fetchTasksByFolder: (folderPath: string) => Promise<void>;
+    fetchTrashTasks: () => Promise<void>;
     fetchTasksByStatus: (status: TaskStatus) => Promise<Task[]>;
     getTaskContent: (id: string) => Promise<string>;
     createTask: (input: CreateTaskInput) => Promise<Task>;
     updateTask: (input: UpdateTaskInput & { isVisible?: boolean }) => Promise<void>;
-    deleteTask: (id: string) => Promise<void>;
+    deleteTask: (id: string, permanent?: boolean) => Promise<void>;
     selectTask: (id: string | null) => void;
 
     // Sync helpers
@@ -84,6 +86,37 @@ export const useTaskStore = create<TaskState>((set, get) => ({
                 const cachedDescription = contentCache.get(info.id) || '';
                 return toTask(info, cachedDescription);
             });
+            set({ tasks, loading: false });
+        } catch (error) {
+            set({ error: String(error), loading: false });
+        }
+    },
+
+    fetchTrashTasks: async () => {
+        set({ loading: true, error: null });
+        try {
+            const trashTasks = await invoke<TrashTaskInfo[]>('listTrashTasks');
+            // Convert TrashTaskInfo to Task format
+            const tasks: Task[] = trashTasks.map((info) => ({
+                id: info.id,
+                title: info.title,
+                rank: 0,
+                status: info.status,
+                color: info.color,
+                pinned: info.pinned,
+                tags: info.tags,
+                due: info.due,
+                created: info.created,
+                updated: info.updated,
+                folderPath: '.trash',
+                path: info.path,
+                description: contentCache.get(info.id) || '',
+                isVisible: false,
+                windowX: 200,
+                windowY: 150,
+                windowWidth: 320,
+                windowHeight: 240,
+            }));
             set({ tasks, loading: false });
         } catch (error) {
             set({ error: String(error), loading: false });
@@ -190,13 +223,15 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         }));
     },
 
-    deleteTask: async (id: string) => {
-        await invoke('deleteTask', { id });
+    deleteTask: async (id: string, permanent?: boolean) => {
+        await invoke('deleteTask', { id, permanent: permanent ?? false });
         contentCache.delete(id);
         set(state => ({
             tasks: state.tasks.filter(t => t.id !== id),
             selectedTaskId: state.selectedTaskId === id ? null : state.selectedTaskId,
         }));
+        // Refresh trash counts
+        useTrashStore.getState().fetchTrashCounts();
     },
 
     selectTask: (id: string | null) => {
@@ -241,8 +276,12 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 
     moveTaskToFolder: async (id: string, targetFolderPath: string) => {
         await invoke('moveTaskToFolder', { id, targetFolderPath });
-        // Refetch all tasks to ensure consistency (path, rank, etc. all change on backend)
-        await get().fetchTasks();
+        // Remove from local state immediately (works for both regular and trash items)
+        set(state => ({
+            tasks: state.tasks.filter(t => t.id !== id),
+        }));
+        // Refresh trash counts (in case item was moved from/to trash)
+        useTrashStore.getState().fetchTrashCounts();
     },
 
     reorderTasks: async (folderPath: string, status: TaskStatus, taskIds: string[]) => {

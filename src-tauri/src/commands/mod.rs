@@ -9,4 +9,6 @@ pub mod password;
 pub mod settings;
 pub mod task;
 pub mod template;
+pub mod trash;
+pub mod vault;
 pub mod workspace;

@@ -3,12 +3,15 @@ import {
   Plus,
   ChevronLeft,
   ChevronRight,
+  Lock,
 } from 'lucide-react';
 import { useUIStore } from '../../stores/uiStore';
+import { useVaultStore } from '../../stores/vaultStore';
 import { Button } from '../ui/Button';
 
 export function Sidebar() {
   const { isSidebarCollapsed, toggleSidebar, openTaskEditor } = useUIStore();
+  const { lock } = useVaultStore();
 
   return (
     <motion.aside
@@ -53,13 +56,22 @@ export function Sidebar() {
       </div>
 
       {/* Footer */}
-      {!isSidebarCollapsed && (
-        <div className="mt-auto p-4 border-t border-gray-200 dark:border-gray-800">
-          <p className="text-xs text-gray-400 text-center">
+      <div className="mt-auto p-3 border-t border-gray-200 dark:border-gray-800">
+        <Button
+          variant="ghost"
+          className={`w-full ${isSidebarCollapsed ? 'px-0' : ''} text-[#888580] hover:text-[#DA7756]`}
+          onClick={() => lock()}
+          title="Lock vault"
+        >
+          <Lock className="w-4 h-4" />
+          {!isSidebarCollapsed && <span className="ml-2">Lock Vault</span>}
+        </Button>
+        {!isSidebarCollapsed && (
+          <p className="text-xs text-gray-400 text-center mt-2">
             Claudia v0.2.0
           </p>
-        </div>
-      )}
+        )}
+      </div>
     </motion.aside>
   );
 }

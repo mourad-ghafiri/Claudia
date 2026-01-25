@@ -25,6 +25,7 @@ import {
     closestCorners,
     DragEndEvent,
     DragStartEvent,
+    MeasuringStrategy,
 } from '@dnd-kit/core';
 import {
     arrayMove,
@@ -46,6 +47,7 @@ const SortableNoteItem = memo(function SortableNoteItem({
     localIsHidden,
     tags,
     loadContent,
+    isTrashView,
 }: {
     note: Note;
     isSelected: boolean;
@@ -56,6 +58,7 @@ const SortableNoteItem = memo(function SortableNoteItem({
     localIsHidden: boolean;
     tags: string[];
     loadContent: (id: string) => void;
+    isTrashView: boolean;
 }) {
     const [showActions, setShowActions] = useState(false);
     const itemRef = useRef<HTMLDivElement>(null);
@@ -101,8 +104,8 @@ const SortableNoteItem = memo(function SortableNoteItem({
     const noteColor = note.color || '#6B9F78';
 
     const style: React.CSSProperties = {
-        transform: CSS.Transform.toString(transform),
-        transition,
+        transform: CSS.Translate.toString(transform),
+        transition: isDragging ? undefined : transition,
         borderLeftColor: noteColor,
         opacity: isDragging ? 0.5 : 1,
     };
@@ -132,15 +135,17 @@ const SortableNoteItem = memo(function SortableNoteItem({
                 }
             `}
         >
-            {/* Drag handle */}
-            <div
-                {...attributes}
-                {...listeners}
-                className="absolute left-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing p-1 hover:bg-[#EBE8E4] dark:hover:bg-[#393939] rounded transition-opacity z-10"
-                onClick={(e) => e.stopPropagation()}
-            >
-                <GripVertical className="w-3.5 h-3.5 text-[#B5AFA6] dark:text-[#6B6B6B]" />
-            </div>
+            {/* Drag handle - hidden in trash view */}
+            {!isTrashView && (
+                <div
+                    {...attributes}
+                    {...listeners}
+                    className="absolute left-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing p-1 hover:bg-[#EBE8E4] dark:hover:bg-[#393939] rounded transition-opacity z-10"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <GripVertical className="w-3.5 h-3.5 text-[#B5AFA6] dark:text-[#6B6B6B]" />
+                </div>
+            )}
 
             {/* Type indicator + Pinned */}
             <div className="absolute top-2 right-2 flex items-center gap-1">
@@ -184,7 +189,7 @@ const SortableNoteItem = memo(function SortableNoteItem({
                 </span>
             </div>
 
-            {/* Actions overlay */}
+            {/* Actions overlay - only delete button in trash view */}
             {showActions && (
                 <motion.div
                     initial={{ opacity: 0 }}
@@ -193,33 +198,37 @@ const SortableNoteItem = memo(function SortableNoteItem({
                     onClick={(e) => e.stopPropagation()}
                     onMouseDown={(e) => e.stopPropagation()}
                 >
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="w-7 h-7 text-[#6B6B6B] hover:text-[#DA7756]"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onToggleFloat(note.id);
-                        }}
-                        title={localIsHidden ? 'Show floating window' : 'Hide floating window'}
-                    >
-                        {localIsHidden ? (
-                            <Eye className="w-3.5 h-3.5" />
-                        ) : (
-                            <EyeOff className="w-3.5 h-3.5" />
-                        )}
-                    </Button>
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="w-7 h-7 text-[#6B6B6B] hover:text-[#DA7756]"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onPin(note.id);
-                        }}
-                    >
-                        <Pin className={`w-3.5 h-3.5 ${note.pinned ? 'text-[#DA7756]' : ''}`} />
-                    </Button>
+                    {!isTrashView && (
+                        <>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="w-7 h-7 text-[#6B6B6B] hover:text-[#DA7756]"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onToggleFloat(note.id);
+                                }}
+                                title={localIsHidden ? 'Show floating window' : 'Hide floating window'}
+                            >
+                                {localIsHidden ? (
+                                    <Eye className="w-3.5 h-3.5" />
+                                ) : (
+                                    <EyeOff className="w-3.5 h-3.5" />
+                                )}
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="w-7 h-7 text-[#6B6B6B] hover:text-[#DA7756]"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onPin(note.id);
+                                }}
+                            >
+                                <Pin className={`w-3.5 h-3.5 ${note.pinned ? 'text-[#DA7756]' : ''}`} />
+                            </Button>
+                        </>
+                    )}
                     <Button
                         variant="ghost"
                         size="icon"
@@ -228,6 +237,7 @@ const SortableNoteItem = memo(function SortableNoteItem({
                             e.stopPropagation();
                             onDelete(note.id);
                         }}
+                        title={isTrashView ? 'Delete permanently' : 'Move to trash'}
                     >
                         <Trash2 className="w-3.5 h-3.5" />
                     </Button>
@@ -238,10 +248,10 @@ const SortableNoteItem = memo(function SortableNoteItem({
 });
 
 export function NotesView() {
-    const { notes, loading, fetchNotes, fetchNotesByFolder, createNote, updateNote, reorderNotes, getNoteById, updateNotePositionLocal, moveNoteToFolder, getNoteContent } = useNoteStore();
-    const { currentFolderPath, setCurrentFolder, moveFolder, getFolderById } = useFolderStore();
+    const { notes, loading, fetchNotes, fetchNotesByFolder, fetchTrashNotes, createNote, updateNote, reorderNotes, getNoteById, updateNotePositionLocal, moveNoteToFolder, getNoteContent } = useNoteStore();
+    const { currentFolderPath, setCurrentFolder, moveFolder, getFolderById, folders, reorderFolders } = useFolderStore();
     // Tags are now stored directly as string arrays on notes
-    const { searchQuery, openDeleteConfirm, selectedNoteId, setSelectedNoteId } = useUIStore();
+    const { searchQuery, openDeleteConfirm, selectedNoteId, setSelectedNoteId, isTrashSelected } = useUIStore();
     const { settings } = useSettingsStore();
     const [editingTitle, setEditingTitle] = useState('');
     const [editingContent, setEditingContent] = useState('');
@@ -365,8 +375,14 @@ export function NotesView() {
     }, [notes, currentFolderPath, searchQuery]);
 
     useEffect(() => {
-        fetchNotes();
-    }, [fetchNotes]);
+        if (isTrashSelected) {
+            fetchTrashNotes();
+        } else if (currentFolderPath) {
+            fetchNotesByFolder(currentFolderPath);
+        } else {
+            fetchNotes();
+        }
+    }, [fetchNotes, fetchNotesByFolder, fetchTrashNotes, isTrashSelected, currentFolderPath]);
 
     // Auto-select first note when entering Notes view for the first time
     useEffect(() => {
@@ -388,6 +404,29 @@ export function NotesView() {
         window.addEventListener('folder-deleted', handleFolderDeleted);
         return () => window.removeEventListener('folder-deleted', handleFolderDeleted);
     }, [fetchNotes, currentFolderPath, setCurrentFolder]);
+
+    // Listen for trash events to refresh view
+    useEffect(() => {
+        const handleTrashEvent = () => {
+            if (isTrashSelected) {
+                // Viewing trash - refetch trash items (will be empty after empty/restore)
+                fetchTrashNotes();
+            } else {
+                // Not viewing trash - refetch regular notes (restored items appear here)
+                if (currentFolderPath) {
+                    fetchNotesByFolder(currentFolderPath);
+                } else {
+                    fetchNotes();
+                }
+            }
+        };
+        window.addEventListener('trash-emptied', handleTrashEvent);
+        window.addEventListener('trash-restored', handleTrashEvent);
+        return () => {
+            window.removeEventListener('trash-emptied', handleTrashEvent);
+            window.removeEventListener('trash-restored', handleTrashEvent);
+        };
+    }, [isTrashSelected, currentFolderPath, fetchNotes, fetchNotesByFolder, fetchTrashNotes]);
 
     // Load content when a note is selected (lazy loading)
     // Uses isCurrent flag to prevent stale async operations from affecting state
@@ -424,14 +463,10 @@ export function NotesView() {
 
     const handleFolderChange = useCallback((folderPath: string | null) => {
         setCurrentFolder(folderPath);
-        if (folderPath) {
-            fetchNotesByFolder(folderPath);
-        } else {
-            fetchNotes();
-        }
+        // The fetch effect will handle fetching based on currentFolderPath change
         // Clear selection - the auto-select effect will pick the first note in new folder
         setSelectedNoteId(null);
-    }, [setCurrentFolder, fetchNotesByFolder, fetchNotes, setSelectedNoteId]);
+    }, [setCurrentFolder, setSelectedNoteId]);
 
     const handleNewNote = () => {
         // Open template selector
@@ -573,6 +608,11 @@ export function NotesView() {
         }
     }, [notes, getFolderById]);
 
+    const handleDragCancel = useCallback(() => {
+        setDraggedNote(null);
+        setDraggedFolder(null);
+    }, []);
+
     const handleDragEnd = useCallback(async (event: DragEndEvent) => {
         const { active, over } = event;
         const wasDraggingFolder = draggedFolder !== null;
@@ -584,15 +624,72 @@ export function NotesView() {
         const activeId = active.id as string;
         const overId = over.id as string;
 
-        // Handle folder movement (drop folder onto another folder to move it inside)
+        // Handle folder movement
         if (wasDraggingFolder) {
-            // overId is in format "folder-{path}" from droppable
+            const activeFolder = getFolderById(activeId);
+            if (!activeFolder) return;
+
+            // Handle folder reordering (drop on indicator between folders)
+            if (typeof overId === 'string' && overId.startsWith('folder-reorder-')) {
+                // Parse: folder-reorder-{parentPath || 'root'}-{index}
+                const parts = overId.replace('folder-reorder-', '').split('-');
+                const targetIndex = parseInt(parts.pop() || '0', 10);
+                const parentPath = parts.join('-') === 'root' ? null : parts.join('-');
+
+                // Only reorder if same parent level
+                if (activeFolder.parentPath === parentPath) {
+                    // Get siblings at this level
+                    const siblings = parentPath === null
+                        ? folders.filter(f => !f.parentPath)
+                        : folders.find(f => f.path === parentPath)?.children || [];
+
+                    // Current index of the dragged folder
+                    const currentIndex = siblings.findIndex(f => f.path === activeFolder.path);
+                    if (currentIndex === -1) return;
+
+                    // Calculate new order
+                    const newOrder = [...siblings];
+                    newOrder.splice(currentIndex, 1);
+                    const insertAt = targetIndex > currentIndex ? targetIndex - 1 : targetIndex;
+                    newOrder.splice(insertAt, 0, activeFolder);
+
+                    const folderPaths = newOrder.map(f => f.path);
+                    try {
+                        await reorderFolders(parentPath, folderPaths);
+                    } catch (error) {
+                        toast.error('Failed to reorder folders');
+                    }
+                } else {
+                    // Moving to different parent - use moveFolder then reorder
+                    try {
+                        await moveFolder(activeFolder.path, parentPath);
+                        toast.success('Folder moved');
+                    } catch (error) {
+                        toast.error('Failed to move folder');
+                    }
+                }
+                return;
+            }
+
+            // Handle dropping folder to root level
+            if (overId === 'folder-root') {
+                // Only move if folder is not already at root level
+                if (activeFolder.parentPath) {
+                    try {
+                        await moveFolder(activeFolder.path, null);
+                        toast.success('Folder moved to root');
+                    } catch (error) {
+                        toast.error('Failed to move folder');
+                    }
+                }
+                return;
+            }
+
+            // Handle dropping folder onto another folder
             if (typeof overId === 'string' && overId.startsWith('folder-')) {
                 const targetFolderPath = overId.replace('folder-', '');
-                // Search recursively through folder tree to find the dragged folder
-                const activeFolder = getFolderById(activeId);
 
-                if (activeFolder && activeFolder.path !== targetFolderPath) {
+                if (activeFolder.path !== targetFolderPath) {
                     // Check if target is not a descendant of the source (prevent moving into itself)
                     if (!targetFolderPath.startsWith(activeFolder.path + '/')) {
                         try {
@@ -602,6 +699,21 @@ export function NotesView() {
                             toast.error('Failed to move folder');
                         }
                     }
+                }
+            }
+            return;
+        }
+
+        // Handle dropping note onto root (all notes)
+        if (overId === 'folder-root') {
+            const note = notes.find(n => n.id === activeId);
+            if (note && note.folderPath) {
+                try {
+                    // Move note to root - passing empty string means root notes folder
+                    await moveNoteToFolder(activeId, '');
+                    toast.success('Note moved to root');
+                } catch (error) {
+                    toast.error('Failed to move note');
                 }
             }
             return;
@@ -640,6 +752,12 @@ export function NotesView() {
             collisionDetection={closestCorners}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
+            onDragCancel={handleDragCancel}
+            measuring={{
+                droppable: {
+                    strategy: MeasuringStrategy.Always,
+                },
+            }}
         >
             <div className="h-full flex bg-[#FAF9F7] dark:bg-[#1A1A1A]">
                 {/* Folder Sidebar */}
@@ -653,14 +771,18 @@ export function NotesView() {
                 <div className="w-80 flex-shrink-0 bg-white dark:bg-[#242424] border-r border-[#EBE8E4] dark:border-[#2E2E2E] flex flex-col">
                     <div className="p-3 border-b border-[#EBE8E4] dark:border-[#2E2E2E]">
                         <div className="flex items-center justify-between">
-                            <h2 className="font-semibold text-[#2D2D2D] dark:text-[#E8E6E3]">Notes</h2>
-                            <button
-                                onClick={handleNewNote}
-                                className="p-1.5 hover:bg-[#F5F3F0] dark:hover:bg-[#2E2E2E] rounded-lg transition-colors"
-                                title="New Note"
-                            >
-                                <Plus className="w-4 h-4 text-[#B5AFA6]" />
-                            </button>
+                            <h2 className="font-semibold text-[#2D2D2D] dark:text-[#E8E6E3]">
+                                {isTrashSelected ? 'Trash' : 'Notes'}
+                            </h2>
+                            {!isTrashSelected && (
+                                <button
+                                    onClick={handleNewNote}
+                                    className="p-1.5 hover:bg-[#F5F3F0] dark:hover:bg-[#2E2E2E] rounded-lg transition-colors"
+                                    title="New Note"
+                                >
+                                    <Plus className="w-4 h-4 text-[#B5AFA6]" />
+                                </button>
+                            )}
                         </div>
                     </div>
 
@@ -691,6 +813,7 @@ export function NotesView() {
                                             localIsHidden={!(localVisibleStates[note.id] ?? note.isVisible)}
                                             tags={note.tags || []}
                                             loadContent={getNoteContent}
+                                            isTrashView={isTrashSelected}
                                         />
                                     ))}
                                 </div>
@@ -749,24 +872,27 @@ export function NotesView() {
                                                 </button>
                                             </>
                                         ) : (
-                                            <button
-                                                onClick={() => {
-                                                    setEditingContent(selectedNote.content);
-                                                    setEditingColor(selectedNote.color || '#6B9F78');
-                                                    // Tags are now string arrays
-                                                    setEditingTags(selectedNote.tags || []);
-                                                    setIsMetadataExpanded(false);
-                                                    setIsEditing(true);
-                                                    // Focus title input after state updates
-                                                    setTimeout(() => {
-                                                        titleInputRef.current?.focus();
-                                                    }, 50);
-                                                }}
-                                                className="px-4 py-2 text-sm font-medium text-[#6B6B6B] dark:text-[#B5AFA6] hover:text-[#DA7756] transition-colors flex items-center gap-1.5"
-                                            >
-                                                <Edit2 className="w-4 h-4" />
-                                                Edit
-                                            </button>
+                                            /* Hide Edit button when viewing trash */
+                                            !isTrashSelected && (
+                                                <button
+                                                    onClick={() => {
+                                                        setEditingContent(selectedNote.content);
+                                                        setEditingColor(selectedNote.color || '#6B9F78');
+                                                        // Tags are now string arrays
+                                                        setEditingTags(selectedNote.tags || []);
+                                                        setIsMetadataExpanded(false);
+                                                        setIsEditing(true);
+                                                        // Focus title input after state updates
+                                                        setTimeout(() => {
+                                                            titleInputRef.current?.focus();
+                                                        }, 50);
+                                                    }}
+                                                    className="px-4 py-2 text-sm font-medium text-[#6B6B6B] dark:text-[#B5AFA6] hover:text-[#DA7756] transition-colors flex items-center gap-1.5"
+                                                >
+                                                    <Edit2 className="w-4 h-4" />
+                                                    Edit
+                                                </button>
+                                            )
                                         )}
                                     </div>
                                 </div>
@@ -836,8 +962,38 @@ export function NotesView() {
 
                 <DragOverlay>
                     {draggedNote && (
-                        <div className="p-3 bg-white dark:bg-[#242424] border border-[#EBE8E4] dark:border-[#393939] rounded-xl opacity-90 shadow-xl w-64 pointer-events-none">
-                            <h3 className="font-medium text-sm text-[#2D2D2D] dark:text-[#E8E6E3]">{draggedNote.title}</h3>
+                        <div
+                            className="relative bg-white dark:bg-[#2E2E2E] rounded-xl shadow-xl border-l-4 py-3 pr-3 pl-7 w-72 pointer-events-none"
+                            style={{ borderLeftColor: draggedNote.color || '#6B9F78' }}
+                        >
+                            {/* Match SortableNoteItem structure exactly */}
+                            <div className="absolute top-2 right-2 flex items-center gap-1">
+                                <FileText className="w-3 h-3 text-[#6B9F78] opacity-50" />
+                                {draggedNote.pinned && <Pin className="w-3 h-3 text-[#DA7756]" />}
+                            </div>
+                            <h3 className="font-medium text-[#2D2D2D] dark:text-[#E8E6E3] text-sm line-clamp-2 pr-10">
+                                {draggedNote.title || 'Untitled Note'}
+                            </h3>
+                            {draggedNote.content && (
+                                <div className="mt-1 text-xs text-[#6B6B6B] dark:text-[#B5AFA6] line-clamp-2">
+                                    <MarkdownRenderer content={draggedNote.content} maxChars={200} />
+                                </div>
+                            )}
+                            <div className="mt-2 flex items-center justify-between">
+                                <div className="flex items-center gap-1">
+                                    {(draggedNote.tags || []).slice(0, 2).map((tag, index) => (
+                                        <span key={`${tag}-${index}`} className="px-1 py-0 text-[9px] rounded bg-[#DA7756]/10 text-[#DA7756]">
+                                            {tag}
+                                        </span>
+                                    ))}
+                                    {(draggedNote.tags || []).length > 2 && (
+                                        <span className="text-[9px] text-[#6B6B6B]">+{(draggedNote.tags || []).length - 2}</span>
+                                    )}
+                                </div>
+                                <span className="text-[10px] text-[#B5AFA6] dark:text-[#6B6B6B]">
+                                    {new Date(draggedNote.updated).toLocaleDateString()}
+                                </span>
+                            </div>
                         </div>
                     )}
                     {draggedFolder && (
